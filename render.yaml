@@ -6,7 +6,8 @@ services:
     runtime: node
     region: oregon
     plan: free
-    buildCommand: npm ci && npm run build
+    # --include=dev forces devDependencies (nest/tsc) even with NODE_ENV=production.
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm run start:prod
     healthCheckPath: /api/v1/health
     envVars:
