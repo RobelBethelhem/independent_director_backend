@@ -10,6 +10,7 @@ export interface AppConfig {
     url: string;
     synchronize: boolean;
     logging: boolean;
+    ssl: boolean;
   };
   jwt: {
     accessSecret: string;
@@ -59,6 +60,8 @@ export default (): AppConfig => ({
       'postgres://zemen:zemen@localhost:5432/zemen_director_portal',
     synchronize: bool(process.env.DB_SYNCHRONIZE, true),
     logging: bool(process.env.DB_LOGGING, false),
+    // Managed Postgres (Render/Neon/Supabase) requires TLS.
+    ssl: bool(process.env.DB_SSL, false),
   },
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me',

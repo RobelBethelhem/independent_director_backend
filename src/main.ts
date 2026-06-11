@@ -23,8 +23,20 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
+  // Allow the configured origin(s) — comma-separated — plus Vercel preview URLs.
+  const allowed = config
+    .getOrThrow<string>('frontendOrigin')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: config.getOrThrow<string>('frontendOrigin'),
+    origin: (origin, cb) => {
+      if (!origin || allowed.includes(origin) || /\.vercel\.app$/.test(new URL(origin).hostname)) {
+        cb(null, true);
+      } else {
+        cb(null, false);
+      }
+    },
     credentials: true,
   });
 

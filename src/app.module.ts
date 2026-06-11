@@ -15,6 +15,7 @@ import { AdminModule } from './admin/admin.module';
 import { ReviewModule } from './review/review.module';
 import { RecommendationsModule } from './recommendations/recommendations.module';
 import { AuditModule } from './audit/audit.module';
+import { SeedModule } from './seed/seed.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
 
@@ -32,6 +33,8 @@ import { StorageModule } from './storage/storage.module';
         autoLoadEntities: true,
         synchronize: config.getOrThrow<boolean>('database.synchronize'),
         logging: config.getOrThrow<boolean>('database.logging'),
+        // Managed Postgres providers terminate TLS with their own CA.
+        ssl: config.getOrThrow<boolean>('database.ssl') ? { rejectUnauthorized: false } : false,
       }),
     }),
     AuthModule,
@@ -44,6 +47,7 @@ import { StorageModule } from './storage/storage.module';
     AuditModule,
     NotificationsModule,
     StorageModule,
+    SeedModule,
   ],
   providers: [
     // Secure-by-default: every route requires a valid JWT unless marked @Public(),
