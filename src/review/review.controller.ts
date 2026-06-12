@@ -2,8 +2,10 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
+  Post,
   Put,
 } from '@nestjs/common';
 import { ReviewService } from './review.service';
@@ -30,6 +32,12 @@ export class ReviewController {
   @Get('shortlist')
   shortlist(@CurrentUser('id') userId: string) {
     return this.review.shortlist(userId);
+  }
+
+  @HttpCode(200)
+  @Post('submit-all')
+  submitAll(@CurrentUser('id') userId: string) {
+    return this.review.submitAll(userId);
   }
 
   @Get('applications/:id')

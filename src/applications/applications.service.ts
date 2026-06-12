@@ -232,6 +232,20 @@ export class ApplicationsService {
     if (!app.firstName) e.firstName = 'Required';
     if (!app.middleName) e.middleName = 'Required';
     if (!app.lastName) e.lastName = 'Required';
+    if (!app.dob) {
+      e.dob = 'Date of birth is required';
+    } else {
+      const d = new Date(app.dob);
+      if (Number.isNaN(d.getTime())) {
+        e.dob = 'Invalid date of birth';
+      } else {
+        const now = new Date();
+        let age = now.getFullYear() - d.getFullYear();
+        const m = now.getMonth() - d.getMonth();
+        if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age -= 1;
+        if (age < 18) e.dob = 'Applicant must be at least 18 years old';
+      }
+    }
     if (!app.email) e.email = 'Required';
     if (!app.phone) e.phone = 'Required';
     if (!app.nationality) e.nationality = 'Required';

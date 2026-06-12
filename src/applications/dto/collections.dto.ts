@@ -59,6 +59,9 @@ class BoardItem {
   @IsOptional() @IsString() @MaxLength(160) org?: string;
   @IsOptional() @IsString() @MaxLength(120) position?: string;
   @IsOptional() @IsString() @MaxLength(60) type?: string;
+  @IsOptional() @IsString() @MaxLength(20) fromMonth?: string;
+  @IsOptional() @IsString() @MaxLength(20) toMonth?: string;
+  @IsOptional() @IsBoolean() isCurrent?: boolean;
   @IsOptional() @IsString() @MaxLength(60) period?: string;
 }
 export class PutBoardsDto {

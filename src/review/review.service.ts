@@ -117,12 +117,23 @@ export class ReviewService {
   async list(reviewerId: string) {
     await this.ensureUnlocked();
     const pool = await this.pool();
-    const myReviews = await this.reviews.find({
-      where: { reviewerUserId: reviewerId, applicationId: In(pool.map((a) => a.id)) },
-    });
+    const poolIds = pool.map((a) => a.id);
+    const [myReviews, myScores] = await Promise.all([
+      this.reviews.find({ where: { reviewerUserId: reviewerId, applicationId: In(poolIds) } }),
+      this.scores.find({ where: { reviewerUserId: reviewerId, applicationId: In(poolIds) } }),
+    ]);
     const byApp = new Map(myReviews.map((r) => [r.applicationId, r]));
+    const scoredCount = new Map<string, number>();
+    for (const s of myScores) scoredCount.set(s.applicationId, (scoredCount.get(s.applicationId) ?? 0) + 1);
     return pool.map((a) => {
       const r = byApp.get(a.id);
+      const scored = scoredCount.get(a.id) ?? 0;
+      // none = not started · draft = scored/saved but not submitted · submitted = done
+      const myStatus: 'none' | 'draft' | 'submitted' = r?.submitted
+        ? 'submitted'
+        : r || scored > 0
+          ? 'draft'
+          : 'none';
       return {
         id: a.id,
         reference: a.reference,
@@ -135,9 +146,54 @@ export class ReviewService {
         flags: a.flagsCount,
         myScore: r?.submitted ? Number(r.weightedScore) : null,
         mySubmitted: !!r?.submitted,
+        myStatus,
+        myScoredCount: scored,
         myShortlist: !!r?.shortlistRecommended,
       };
     });
+  }
+
+  /** Bulk-submit every fully-scored draft; returns counts + the incomplete ones skipped. */
+  async submitAll(reviewerId: string) {
+    await this.ensureUnlocked();
+    const pool = await this.pool();
+    const poolIds = pool.map((a) => a.id);
+    const [reviews, scoreRows] = await Promise.all([
+      this.reviews.find({ where: { reviewerUserId: reviewerId, applicationId: In(poolIds) } }),
+      this.scores.find({ where: { reviewerUserId: reviewerId, applicationId: In(poolIds) } }),
+    ]);
+    const reviewByApp = new Map(reviews.map((r) => [r.applicationId, r]));
+    const scoresByApp = new Map<string, typeof scoreRows>();
+    for (const s of scoreRows) {
+      const arr = scoresByApp.get(s.applicationId) ?? [];
+      arr.push(s);
+      scoresByApp.set(s.applicationId, arr);
+    }
+    const nameOf = (a: Application) =>
+      [a.title, a.firstName, a.lastName].filter(Boolean).join(' ') || a.reference || a.id;
+
+    const submittedIds: string[] = [];
+    const skipped: { id: string; name: string; scored: number; total: number }[] = [];
+
+    for (const a of pool) {
+      const r = reviewByApp.get(a.id);
+      const sc = scoresByApp.get(a.id) ?? [];
+      const isDraft = (!!r && !r.submitted) || (sc.length > 0 && !r?.submitted);
+      if (!isDraft) continue; // skip not-started + already-submitted
+      if (sc.length < CRITERIA_COUNT) {
+        skipped.push({ id: a.id, name: nameOf(a), scored: sc.length, total: CRITERIA_COUNT });
+        continue;
+      }
+      const review = await this.upsertReview(reviewerId, a.id);
+      review.submitted = true;
+      review.weightedScore = String(this.weighted(new Map(sc.map((s) => [s.criterionId, s.value]))));
+      await this.reviews.save(review);
+      submittedIds.push(a.id);
+    }
+
+    setAuditInfo({ entityType: 'review' });
+    setAuditMeta({ submittedCount: submittedIds.length, skippedCount: skipped.length, applicationIds: submittedIds });
+    return { submitted: submittedIds.length, skipped };
   }
 
   async dossier(reviewerId: string, id: string) {

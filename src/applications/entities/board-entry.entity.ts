@@ -30,6 +30,16 @@ export class BoardEntry {
   @Column({ type: 'varchar', nullable: true })
   type!: string | null;
 
+  @Column({ name: 'from_month', type: 'varchar', nullable: true })
+  fromMonth!: string | null;
+
+  @Column({ name: 'to_month', type: 'varchar', nullable: true })
+  toMonth!: string | null;
+
+  @Column({ name: 'is_current', type: 'boolean', default: false })
+  isCurrent!: boolean;
+
+  /** Legacy free-text period (kept for older records). */
   @Column({ type: 'varchar', nullable: true })
   period!: string | null;
 

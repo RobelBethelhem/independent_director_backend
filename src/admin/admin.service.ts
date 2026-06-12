@@ -105,7 +105,7 @@ export class AdminService {
     return employment.length ? totalExperienceYears(employment) : null;
   }
 
-  private toListItem(app: Application, score: number | null) {
+  private toListItem(app: Application, score: number | null, evaluatorScores: (number | null)[] = []) {
     return {
       id: app.id,
       reference: app.reference,
@@ -123,13 +123,46 @@ export class AdminService {
       years: this.deriveYears(app),
       submittedAt: app.submittedAt,
       score,
+      evaluatorScores,
     };
+  }
+
+  /** The review committee, in a stable order (defines Evaluator 1..N). */
+  private committee() {
+    return this.users.findByRole(UserRole.Reviewer);
+  }
+
+  /** Per-evaluator submitted scores for each app, aligned to the committee order. */
+  private async evaluatorScoresByApp(appIds: string[], reviewers: { id: string }[]) {
+    const out = new Map<string, (number | null)[]>();
+    if (appIds.length === 0) return out;
+    const reviews = await this.reviews.find({ where: { applicationId: In(appIds), submitted: true } });
+    const byApp = new Map<string, Map<string, number>>();
+    for (const r of reviews) {
+      if (r.weightedScore == null) continue;
+      let m = byApp.get(r.applicationId);
+      if (!m) {
+        m = new Map();
+        byApp.set(r.applicationId, m);
+      }
+      m.set(r.reviewerUserId, Math.round(Number(r.weightedScore)));
+    }
+    for (const id of appIds) {
+      const m = byApp.get(id);
+      out.set(id, reviewers.map((rv) => m?.get(rv.id) ?? null));
+    }
+    return out;
   }
 
   async list(q: AdminListQueryDto) {
     const pool = await this.pool();
-    const scores = await this.scoresByApp(pool.map((a) => a.id));
-    let items = pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null));
+    const poolIds = pool.map((a) => a.id);
+    const reviewers = await this.committee();
+    const [scores, evalScores] = await Promise.all([
+      this.scoresByApp(poolIds),
+      this.evaluatorScoresByApp(poolIds, reviewers),
+    ]);
+    let items = pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? []));
 
     if (q.query) {
       const needle = q.query.toLowerCase();
@@ -154,14 +187,26 @@ export class AdminService {
     const page = q.page ?? 1;
     const total = items.length;
     const paged = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-    return { items: paged, total, page, pageSize: PAGE_SIZE, poolTotal: pool.length };
+    return {
+      items: paged,
+      total,
+      page,
+      pageSize: PAGE_SIZE,
+      poolTotal: pool.length,
+      reviewers: reviewers.map((r, i) => ({ id: r.id, name: r.name ?? r.email, label: `Evaluator ${i + 1}` })),
+    };
   }
 
   /** All pool applications (no pagination) for the Kanban board. */
   async board() {
     const pool = await this.pool();
-    const scores = await this.scoresByApp(pool.map((a) => a.id));
-    return pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null));
+    const poolIds = pool.map((a) => a.id);
+    const reviewers = await this.committee();
+    const [scores, evalScores] = await Promise.all([
+      this.scoresByApp(poolIds),
+      this.evaluatorScoresByApp(poolIds, reviewers),
+    ]);
+    return pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? []));
   }
 
   async stats() {
