@@ -47,7 +47,13 @@ export class AuthService {
 
   // ---- Registration & verification ----
 
-  async register(dto: RegisterDto): Promise<{ email: string; otpRequired: true }> {
+  /** When true (OTP_DEV_MODE), the verification code is returned in the API response
+   *  so demo/test deployments without email can still complete sign-up. */
+  private get devMode(): boolean {
+    return this.config.get<boolean>('otp.devMode') ?? false;
+  }
+
+  async register(dto: RegisterDto): Promise<{ email: string; otpRequired: true; devCode?: string }> {
     const existing = await this.users.findByEmail(dto.email);
     if (existing) {
       throw new ConflictException('An account with this email already exists');
@@ -58,7 +64,7 @@ export class AuthService {
       phone: dto.phone,
       passwordHash,
     });
-    await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
+    const code = await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
     // Trace the referral if they registered from a recommendation link.
     if (dto.recommendationToken) {
       await this.recommendations.linkToUser(dto.recommendationToken, user.id).catch(() => undefined);
@@ -71,7 +77,7 @@ export class AuthService {
       entityId: user.id,
       metadata: dto.recommendationToken ? { viaRecommendation: true } : undefined,
     });
-    return { email: user.email, otpRequired: true };
+    return { email: user.email, otpRequired: true, ...(this.devMode ? { devCode: code } : {}) };
   }
 
   async verifyOtp(dto: VerifyOtpDto): Promise<AuthSession> {
@@ -111,11 +117,12 @@ export class AuthService {
     return this.issueSession(user);
   }
 
-  async resendOtp(email: string): Promise<{ ok: true }> {
+  async resendOtp(email: string): Promise<{ ok: true; devCode?: string }> {
     const user = await this.users.findByEmail(email);
     // Don't leak whether the account exists.
     if (user && !user.emailVerified) {
-      await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
+      const code = await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
+      if (this.devMode) return { ok: true, devCode: code };
     }
     return { ok: true };
   }

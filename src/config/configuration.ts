@@ -22,6 +22,8 @@ export interface AppConfig {
     ttlMinutes: number;
     maxAttempts: number;
     length: number;
+    /** Demo/test environments with no email: return the OTP in the API response. */
+    devMode: boolean;
   };
   storage: {
     endpoint: string;
@@ -73,6 +75,7 @@ export default (): AppConfig => ({
     ttlMinutes: int(process.env.OTP_TTL_MINUTES, 10),
     maxAttempts: int(process.env.OTP_MAX_ATTEMPTS, 5),
     length: int(process.env.OTP_LENGTH, 4),
+    devMode: bool(process.env.OTP_DEV_MODE, false),
   },
   storage: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
