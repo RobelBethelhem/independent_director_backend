@@ -60,8 +60,10 @@ export enum DeclarationAnswer {
 }
 
 export enum DocType {
+  Photo = 'photo',
   Cv = 'cv',
   Edu = 'edu',
+  Work = 'work',
   Prof = 'prof',
   Id = 'id',
   Tin = 'tin',
@@ -69,13 +71,21 @@ export enum DocType {
   Other = 'other',
 }
 
-/** Required document types (at least one clean file each before submission). */
-export const REQUIRED_DOC_TYPES: DocType[] = [DocType.Cv, DocType.Edu, DocType.Id, DocType.Tin];
+/**
+ * Required document types that are NOT tied to a specific repeatable entry
+ * (at least one clean file each before submission). The profile photo, the
+ * per-degree educational certificates (DocType.Edu) and the per-position work
+ * experience letters (DocType.Work) are validated separately, against each
+ * education / employment entry.
+ */
+export const REQUIRED_DOC_TYPES: DocType[] = [DocType.Cv, DocType.Id, DocType.Tin];
 
 /** Human-readable labels (mirror the frontend DOC_TYPES labels). */
 export const DOC_TYPE_LABELS: Record<DocType, string> = {
+  [DocType.Photo]: 'Profile photo',
   [DocType.Cv]: 'Curriculum Vitae (CV)',
-  [DocType.Edu]: 'Educational certificates',
+  [DocType.Edu]: 'Educational certificate',
+  [DocType.Work]: 'Work experience document',
   [DocType.Prof]: 'Professional certificates',
   [DocType.Id]: 'National ID / Passport',
   [DocType.Tin]: 'Tax Identification (TIN)',

@@ -14,11 +14,13 @@ import {
   ALL_DECLARATION_IDS,
   ApplicationStatus,
   DeclarationAnswer,
+  DocType,
   DOC_TYPE_LABELS,
   REQUIRED_DOC_TYPES,
 } from '../common/enums';
 import { degreeLevel, isRelevantField, MIN_DEGREE_LEVEL } from '../common/degree';
 import { MIN_EXPERIENCE_YEARS, totalExperienceYears } from '../common/experience';
+import { StorageService } from '../storage/storage.service';
 import { Application } from './entities/application.entity';
 import { EducationEntry } from './entities/education-entry.entity';
 import { ProfessionalQual } from './entities/professional-qual.entity';
@@ -27,6 +29,7 @@ import { BoardEntry } from './entities/board-entry.entity';
 import { ExpertiseSelection } from './entities/expertise.entity';
 import { ReferenceContact } from './entities/reference-contact.entity';
 import { Declaration } from './entities/declaration.entity';
+import { ApplicationDocument } from './entities/document.entity';
 import { UpdateApplicationDto, UpdateProgressDto } from './dto/update-application.dto';
 import {
   CertifyDto,
@@ -55,9 +58,12 @@ export class ApplicationsService {
   constructor(
     @InjectRepository(Application)
     private readonly apps: Repository<Application>,
+    @InjectRepository(ApplicationDocument)
+    private readonly docs: Repository<ApplicationDocument>,
     private readonly recruitment: RecruitmentService,
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
   private get manager(): EntityManager {
@@ -109,6 +115,12 @@ export class ApplicationsService {
   async replaceEducation(userId: string, id: string, dto: PutEducationDto): Promise<Application> {
     await this.assertEditableOwned(userId, id);
     await this.replaceCollection(EducationEntry, id, dto.items);
+    // Drop certificates whose education entry was removed.
+    await this.cleanupOrphanEntryDocs(
+      id,
+      'educationEntryId',
+      dto.items.map((it) => it.id).filter((v): v is string => !!v),
+    );
     return (await this.getById(id))!;
   }
 
@@ -121,7 +133,34 @@ export class ApplicationsService {
   async replaceEmployment(userId: string, id: string, dto: PutEmploymentDto): Promise<Application> {
     await this.assertEditableOwned(userId, id);
     await this.replaceCollection(EmploymentEntry, id, dto.items);
+    // Drop work documents whose employment entry was removed.
+    await this.cleanupOrphanEntryDocs(
+      id,
+      'employmentEntryId',
+      dto.items.map((it) => it.id).filter((v): v is string => !!v),
+    );
     return (await this.getById(id))!;
+  }
+
+  /** Delete entry-linked documents (+ their stored files) whose entry no longer exists. */
+  private async cleanupOrphanEntryDocs(
+    appId: string,
+    field: 'educationEntryId' | 'employmentEntryId',
+    keepIds: string[],
+  ): Promise<void> {
+    const linked = await this.docs
+      .createQueryBuilder('d')
+      .where('d.application_id = :appId', { appId })
+      .andWhere(`d.${field === 'educationEntryId' ? 'education_entry_id' : 'employment_entry_id'} IS NOT NULL`)
+      .getMany();
+    const keep = new Set(keepIds);
+    const orphans = linked.filter((d) => !keep.has((d[field] as string) ?? ''));
+    for (const d of orphans) {
+      await this.storage.delete(d.storageKey).catch(() => undefined);
+    }
+    if (orphans.length) {
+      await this.docs.delete(orphans.map((d) => d.id));
+    }
   }
 
   async replaceBoards(userId: string, id: string, dto: PutBoardsDto): Promise<Application> {
@@ -284,11 +323,46 @@ export class ApplicationsService {
       e.references = 'Provide at least two references, each with a name, email, and stated relationship to you.';
     }
 
-    // Required documents (§: each must have at least one uploaded, virus-scanned file).
-    const uploadedTypes = new Set((app.documents ?? []).map((d) => d.docType));
-    const cleanTypes = new Set(
-      (app.documents ?? []).filter((d) => d.scannedClean).map((d) => d.docType),
+    const docs = app.documents ?? [];
+
+    // Profile photo (so the Committee can see the candidate).
+    const photos = docs.filter((d) => d.docType === DocType.Photo);
+    if (photos.length === 0) {
+      e.photo = 'Upload a recent profile photo.';
+    } else if (!photos.some((d) => d.scannedClean)) {
+      e.photo = 'Your photo is still being processed — please wait a moment and resubmit.';
+    }
+
+    // Per-degree educational certificate: every qualification entered must carry its certificate.
+    const degreeEntries = education.filter((ed) => (ed.degree ?? '').trim());
+    const eduCertFor = (entryId: string) =>
+      docs.filter((d) => d.docType === DocType.Edu && d.educationEntryId === entryId);
+    const eduMissing = degreeEntries.filter((ed) => eduCertFor(ed.id).length === 0);
+    const eduUnscanned = degreeEntries.filter(
+      (ed) => eduCertFor(ed.id).length > 0 && !eduCertFor(ed.id).some((d) => d.scannedClean),
     );
+    if (eduMissing.length > 0) {
+      e.educationDocs = `Attach the certificate for each qualification you listed (${eduMissing.length} still missing a document).`;
+    } else if (eduUnscanned.length > 0) {
+      e.educationDocs = 'An educational certificate is still being processed — please wait a moment and resubmit.';
+    }
+
+    // Per-position work document: every employment position entered must carry its supporting letter.
+    const workDocFor = (entryId: string) =>
+      docs.filter((d) => d.docType === DocType.Work && d.employmentEntryId === entryId);
+    const workMissing = realJobs.filter((j) => workDocFor(j.id).length === 0);
+    const workUnscanned = realJobs.filter(
+      (j) => workDocFor(j.id).length > 0 && !workDocFor(j.id).some((d) => d.scannedClean),
+    );
+    if (workMissing.length > 0) {
+      e.employmentDocs = `Attach the supporting document for each position you listed (${workMissing.length} still missing a document).`;
+    } else if (workUnscanned.length > 0) {
+      e.employmentDocs = 'A work experience document is still being processed — please wait a moment and resubmit.';
+    }
+
+    // Standalone required documents (CV, National ID, TIN).
+    const uploadedTypes = new Set(docs.map((d) => d.docType));
+    const cleanTypes = new Set(docs.filter((d) => d.scannedClean).map((d) => d.docType));
     const missingDocs = REQUIRED_DOC_TYPES.filter((t) => !uploadedTypes.has(t));
     const unscannedDocs = REQUIRED_DOC_TYPES.filter((t) => uploadedTypes.has(t) && !cleanTypes.has(t));
     if (missingDocs.length > 0) {

@@ -18,6 +18,7 @@ import {
   ApplicationStatus,
   CRITERION_WEIGHTS,
   CriterionId,
+  DocType,
   SCORE_MAX,
 } from '../common/enums';
 import { PutReviewDto, PutScoresDto } from './review.dto';
@@ -216,6 +217,22 @@ export class ReviewService {
     const sortByOrder = <T extends { sort?: number }>(rows: T[]) =>
       [...rows].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
 
+    const allDocs = app.documents ?? [];
+    const docOut = (d: ApplicationDocument) => ({ id: d.id, originalFilename: d.originalFilename });
+    const eduDocFor = (entryId: string) => {
+      const d = allDocs.find((x) => x.docType === DocType.Edu && x.educationEntryId === entryId);
+      return d ? docOut(d) : null;
+    };
+    const workDocFor = (entryId: string) => {
+      const d = allDocs.find((x) => x.docType === DocType.Work && x.employmentEntryId === entryId);
+      return d ? docOut(d) : null;
+    };
+    const photoDoc = allDocs.find((d) => d.docType === DocType.Photo);
+    // The generic Documents tab excludes the photo + entry-linked files (shown inline).
+    const genericDocs = allDocs.filter(
+      (d) => d.docType !== DocType.Photo && !d.educationEntryId && !d.employmentEntryId,
+    );
+
     return {
       id: app.id,
       reference: app.reference,
@@ -234,9 +251,26 @@ export class ReviewService {
       boards: (app.boards ?? []).filter((b) => b.org).length,
       flags: app.flagsCount,
       expertise: (app.expertise ?? []).map((e) => e.value),
-      education: sortByOrder(app.education ?? []),
+      photo: photoDoc ? docOut(photoDoc) : null,
+      education: sortByOrder(app.education ?? []).map((ed) => ({
+        id: ed.id,
+        degree: ed.degree,
+        field: ed.field,
+        institution: ed.institution,
+        year: ed.year,
+        document: eduDocFor(ed.id),
+      })),
       professionalQuals: sortByOrder(app.professionalQuals ?? []),
-      employment: sortByOrder(app.employment ?? []),
+      employment: sortByOrder(app.employment ?? []).map((em) => ({
+        id: em.id,
+        org: em.org,
+        role: em.role,
+        fromMonth: em.fromMonth,
+        toMonth: em.toMonth,
+        isCurrent: em.isCurrent,
+        summary: em.summary,
+        document: workDocFor(em.id),
+      })),
       boardEntries: sortByOrder(app.boards ?? []),
       references: sortByOrder(app.references ?? []).map((r) => ({
         name: r.name,
@@ -245,7 +279,7 @@ export class ReviewService {
       })),
       conflictsText: app.conflictsText,
       declarations: app.declarations,
-      documents: (app.documents ?? []).map((d) => ({ id: d.id, docType: d.docType, originalFilename: d.originalFilename })),
+      documents: genericDocs.map((d) => ({ id: d.id, docType: d.docType, originalFilename: d.originalFilename })),
       recommendation,
       myScores,
       myReview: review

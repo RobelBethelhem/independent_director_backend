@@ -30,6 +30,21 @@ export class ApplicationDocument {
   @Column({ name: 'doc_type', type: 'enum', enum: DocType })
   docType!: DocType;
 
+  /**
+   * Soft link to the education / employment entry this file supports (a per-degree
+   * certificate or a per-position work letter). Plain nullable UUID columns — NOT a
+   * foreign key — because the entries are saved with PUT-replace (delete + reinsert
+   * with the same client-supplied id), and a FK with cascade would wipe the file on
+   * every save. Null for standalone documents (CV, ID, TIN, photo, …).
+   */
+  @Column({ name: 'education_entry_id', type: 'uuid', nullable: true })
+  @Index()
+  educationEntryId!: string | null;
+
+  @Column({ name: 'employment_entry_id', type: 'uuid', nullable: true })
+  @Index()
+  employmentEntryId!: string | null;
+
   @Column({ name: 'original_filename', type: 'varchar' })
   originalFilename!: string;
 

@@ -1,4 +1,18 @@
+import { DocType } from '../../common/enums';
+
 /** Upload limits: official documents must be PDF, ≤10 MB each. */
 export const MAX_DOC_SIZE_BYTES = 10 * 1024 * 1024;
 
-export const ALLOWED_MIME_TYPES = ['application/pdf'];
+/** Profile photos may be common web image formats. */
+export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
+
+/** All other supporting documents must be PDF. */
+export const PDF_MIME_TYPES = ['application/pdf'];
+
+/** Backwards-compatible default (PDF) used where the doc type isn't specialised. */
+export const ALLOWED_MIME_TYPES = PDF_MIME_TYPES;
+
+/** The accepted MIME types for a given document type — images for the photo, PDF otherwise. */
+export function allowedMimesFor(docType: DocType): string[] {
+  return docType === DocType.Photo ? IMAGE_MIME_TYPES : PDF_MIME_TYPES;
+}

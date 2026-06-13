@@ -6,6 +6,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -22,6 +23,8 @@ import {
  */
 
 class EducationItem {
+  // Client-supplied stable id so per-degree certificates stay linked across PUT-replace.
+  @IsOptional() @IsUUID() id?: string;
   @IsOptional() @IsString() @MaxLength(120) degree?: string;
   @IsOptional() @IsString() @MaxLength(120) field?: string;
   @IsOptional() @IsString() @MaxLength(160) institution?: string;
@@ -43,6 +46,8 @@ export class PutProfessionalDto {
 }
 
 class EmploymentItem {
+  // Client-supplied stable id so per-position work documents stay linked across PUT-replace.
+  @IsOptional() @IsUUID() id?: string;
   @IsOptional() @IsString() @MaxLength(160) org?: string;
   @IsOptional() @IsString() @MaxLength(160) role?: string;
   @IsOptional() @IsString() @MaxLength(20) fromMonth?: string;

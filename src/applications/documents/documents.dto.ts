@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { DocType } from '../../common/enums';
 import { MAX_DOC_SIZE_BYTES } from './document.constants';
 
@@ -40,4 +40,13 @@ export class RecordDocumentDto {
   @Min(1)
   @Max(MAX_DOC_SIZE_BYTES)
   sizeBytes!: number;
+
+  /** Optional soft links to the education / employment entry this file supports. */
+  @IsOptional()
+  @IsUUID()
+  educationEntryId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  employmentEntryId?: string;
 }
