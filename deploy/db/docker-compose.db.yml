@@ -1,0 +1,31 @@
+# On-prem deployment for the Database Server (10.1.1.174).
+# Runs ONLY Postgres — deliberately segregated from the Application Server
+# (10.1.1.94), which runs the API/frontend/document storage. See ../onprem/.
+#
+# Usage (from this directory):
+#   cp postgres.env.example postgres.env   # fill in real values
+#   docker compose -f docker-compose.db.yml up -d
+#
+# The port is published bound to THIS server's own IP (10.1.1.174) only, so
+# it's never reachable via localhost tricks or another interface. Firewall it
+# further so only the app server can connect — see DEPLOY_ONPREM.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zemen-postgres
+    restart: unless-stopped
+    env_file:
+      - postgres.env
+    ports:
+      - "10.1.1.174:5432:5432"
+    volumes:
+      - zemen-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zemen-pgdata:

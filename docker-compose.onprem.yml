@@ -1,0 +1,73 @@
+# On-prem deployment for the Application Server (10.1.1.94).
+# Runs the API + frontend + document storage. Postgres is deliberately NOT
+# here — it lives on the segregated Database Server; see deploy/db/.
+#
+# Expects this backend repo and the frontend repo cloned as SIBLING folders,
+# e.g.:
+#   ~/zemen/backend    <- this repo (run docker compose from here)
+#   ~/zemen/frontend   <- the frontend repo
+#
+# Usage (from this directory, i.e. ~/zemen/backend):
+#   cp deploy/onprem/backend.env.example deploy/onprem/backend.env   # fill in real values
+#   cp deploy/onprem/minio.env.example   deploy/onprem/minio.env     # fill in real values
+#   docker compose -f docker-compose.onprem.yml up -d --build
+#
+# See DEPLOY_ONPREM.md for the full walkthrough.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zemen-backend
+    restart: unless-stopped
+    env_file:
+      - deploy/onprem/backend.env
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/api/v1/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    # Not published to the host — nginx (the `frontend` service) reaches it at
+    # http://backend:3000 over the internal compose network. Uncomment to
+    # debug the API directly from the app server:
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: zemen-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+  minio:
+    image: minio/minio:latest
+    container_name: zemen-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    env_file:
+      - deploy/onprem/minio.env
+    volumes:
+      - zemen-miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Console (bucket browser) reachable only from the app server itself;
+    # SSH-tunnel to it if you need to inspect uploaded files: ssh -L 9001:localhost:9001 user@10.1.1.94
+    ports:
+      - "127.0.0.1:9001:9001"
+
+volumes:
+  zemen-miniodata:
