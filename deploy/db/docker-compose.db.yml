@@ -9,6 +9,10 @@
 # The port is published bound to THIS server's own IP (10.1.1.174) only, so
 # it's never reachable via localhost tricks or another interface. Firewall it
 # further so only the app server can connect — see DEPLOY_ONPREM.md.
+#
+# Published externally as 3306 (the port opened on this server's firewall) —
+# Postgres itself still runs on its native 5432 *inside* the container; only
+# the host-facing mapping changes. No Postgres config change needed.
 
 services:
   postgres:
@@ -18,7 +22,7 @@ services:
     env_file:
       - postgres.env
     ports:
-      - "10.1.1.174:5432:5432"
+      - "10.1.1.174:3306:5432"
     volumes:
       - zemen-pgdata:/var/lib/postgresql/data
     healthcheck:

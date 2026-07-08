@@ -8,7 +8,9 @@ Segregated two-server layout, fully independent of the Vercel/Render deployment
 | **Application Server** | `10.1.1.94` | Docker: `backend` (NestJS API) + `frontend` (nginx serving the SPA, reverse-proxying `/api`) + `minio` (document storage) |
 | **Database Server** | `10.1.1.174` | Docker: `postgres` only |
 
-The app server talks to Postgres over the internal network at `10.1.1.174:5432`.
+The app server talks to Postgres over the internal network at `10.1.1.174:3306`
+(the port opened on the DB server's firewall — Postgres itself still runs on
+its native 5432 *inside* the container; only the external mapping changed).
 Nothing here touches `render.yaml`, `../frontend/vercel.json`, or the existing
 local dev `docker-compose.yml` — those are separate deployments.
 
@@ -131,8 +133,8 @@ docker compose -f docker-compose.db.yml ps      # should show "healthy"
 **Firewall it to the app server only** (`ufw` example — adjust for your distro):
 
 ```bash
-sudo ufw allow from 10.1.1.94 to any port 5432 proto tcp
-sudo ufw deny 5432
+sudo ufw allow from 10.1.1.94 to any port 3306 proto tcp
+sudo ufw deny 3306
 ```
 
 The compose file also binds the published port to `10.1.1.174` specifically
@@ -206,8 +208,8 @@ If you ever change `deploy/db/docker-compose.db.yml` or `postgres.env`, re-run
 
 - **`backend` unhealthy / can't reach Postgres** — check `DATABASE_URL` in
   `deploy/onprem/backend.env` matches the DB server's real user/password/IP,
-  and that the DB server's firewall allows `10.1.1.94` on port 5432:
-  `docker logs zemen-backend`, and from the app server: `nc -zv 10.1.1.174 5432`.
+  and that the DB server's firewall allows `10.1.1.94` on port 3306:
+  `docker logs zemen-backend`, and from the app server: `nc -zv 10.1.1.174 3306`.
 - **Uploads fail** — `S3_ACCESS_KEY`/`S3_SECRET_KEY` in `backend.env` must
   exactly match `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in `minio.env`.
 - **502 from nginx** — the `backend` container isn't up yet or crashed:
