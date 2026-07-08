@@ -31,27 +31,90 @@ sudo usermod -aG docker "$USER"   # log out/in once so `docker` works without su
 > Desktop** (or Docker Engine via WSL2) instead, and run the commands below in
 > PowerShell — `docker`/`docker compose` are identical either way.
 
-**If these servers have no internet egress** (common on a segregated banking
-network), `git clone`/`docker pull` from GitHub/Docker Hub won't reach them.
-Work around it from a machine that does have internet access (your laptop, or
-a jump host):
-
-```bash
-git clone <backend-repo> && git clone <frontend-repo>
-# build + save the images as tar files
-docker compose -f backend/docker-compose.onprem.yml build
-docker save zemen-backend zemen-frontend minio/minio postgres:16-alpine \
-  -o zemen-images.tar
-# copy the code + tar to the app/db servers (scp/rsync), then on each server:
-docker load -i zemen-images.tar
-```
-
-The rest of this guide assumes normal internet egress; skip the `--build` step
-below and just `docker compose up -d` if you pre-built and loaded images this way.
+**If these servers have no internet egress** (a firewall/inspection device
+resets or silently drops outbound HTTPS to arbitrary hosts — the case if
+`git clone https://github.com/...` fails with "Connection reset by peer" or
+times out even though DNS resolves fine), skip straight to §0a below. It needs
+no firewall change: it reuses the same SSH access you already have to both
+servers.
 
 ---
 
-## 1. Database Server (10.1.1.174)
+## 0a. Offline path — build elsewhere, ship pre-built images over SSH
+
+Do this on a machine that **does** have internet access and already has this
+code (e.g. your dev laptop — Docker Desktop is enough, no cluster needed) and
+can already reach both servers over SSH (the same access used for the
+terminal sessions you're using now).
+
+**1. Build and tag the images** (from the `backend/` folder):
+
+```powershell
+docker build -t zemen-backend:latest  -f Dockerfile .
+docker build -t zemen-frontend:latest -f ../frontend/Dockerfile ../frontend
+# minio/minio:latest and postgres:16-alpine are pulled automatically the first
+# time you `docker compose up` locally, or: docker pull minio/minio:latest && docker pull postgres:16-alpine
+```
+
+**2. Save them into two tar files** — one bundle per server, so you're not
+shipping Postgres to the app server or vice versa:
+
+```powershell
+docker save zemen-backend:latest zemen-frontend:latest minio/minio:latest -o zemen-app-images.tar
+docker save postgres:16-alpine -o zemen-db-image.tar
+```
+
+(`zemen-backend`/`zemen-frontend` ≈ 650 MB + 80 MB, `minio/minio` ≈ 240 MB,
+`postgres:16-alpine` ≈ 400 MB — a few minutes over a normal internal link.)
+
+**3. Create the target folders and copy everything over** (no git needed on
+either server — the images are pre-built, and with a pre-loaded image, Compose
+doesn't need the `../frontend` source tree either):
+
+```powershell
+ssh user@10.1.1.94  "mkdir -p ~/zemen/backend/deploy/onprem"
+scp zemen-app-images.tar                                        user@10.1.1.94:~/zemen/
+scp docker-compose.onprem.yml                                    user@10.1.1.94:~/zemen/backend/
+scp deploy/onprem/backend.env.example deploy/onprem/minio.env.example  user@10.1.1.94:~/zemen/backend/deploy/onprem/
+
+ssh user@10.1.1.174 "mkdir -p ~/deploy/db"
+scp zemen-db-image.tar                                           user@10.1.1.174:~/
+scp deploy/db/docker-compose.db.yml deploy/db/postgres.env.example  user@10.1.1.174:~/deploy/db/
+```
+
+**4. On the Database Server** (`ssh user@10.1.1.174`):
+
+```bash
+docker load -i ~/zemen-db-image.tar
+cd ~/deploy/db
+cp postgres.env.example postgres.env
+nano postgres.env                 # set POSTGRES_USER / POSTGRES_PASSWORD
+docker compose -f docker-compose.db.yml up -d
+```
+
+**5. On the Application Server** (`ssh user@10.1.1.94`):
+
+```bash
+docker load -i ~/zemen/zemen-app-images.tar
+cd ~/zemen/backend
+cp deploy/onprem/backend.env.example deploy/onprem/backend.env
+cp deploy/onprem/minio.env.example   deploy/onprem/minio.env
+nano deploy/onprem/backend.env    # DATABASE_URL -> 10.1.1.174, JWT secrets, etc.
+nano deploy/onprem/minio.env      # must match S3_ACCESS_KEY/S3_SECRET_KEY above
+docker compose -f docker-compose.onprem.yml up -d    # NO --build — uses the loaded images
+```
+
+Then browse `http://10.1.1.94` from the internal network. To ship a later
+code change this way again, just repeat steps 1–5 (image tags are reused, so
+`docker load` replaces them in place).
+
+> If the firewall change from `DEPLOY_ONPREM.md`'s network section eventually
+> goes through, switch to the normal `git clone` + `--build` flow in §1/§2
+> below — nothing about this offline setup needs to be undone first.
+
+---
+
+## 1. Database Server (10.1.1.174) — online path (needs internet egress from this server)
 
 ```bash
 ssh user@10.1.1.174
@@ -78,7 +141,7 @@ the firewall rule — the firewall is the second layer of defense.
 
 ---
 
-## 2. Application Server (10.1.1.94)
+## 2. Application Server (10.1.1.94) — online path (needs internet egress from this server)
 
 Clone **both** repos as sibling folders — the on-prem compose file expects
 `../frontend` to exist next to `backend`:

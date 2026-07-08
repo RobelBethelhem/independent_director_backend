@@ -7,15 +7,21 @@
 #   ~/zemen/backend    <- this repo (run docker compose from here)
 #   ~/zemen/frontend   <- the frontend repo
 #
-# Usage (from this directory, i.e. ~/zemen/backend):
+# Usage (from this directory, i.e. ~/zemen/backend), when this server has
+# internet access to build the images directly:
 #   cp deploy/onprem/backend.env.example deploy/onprem/backend.env   # fill in real values
 #   cp deploy/onprem/minio.env.example   deploy/onprem/minio.env     # fill in real values
 #   docker compose -f docker-compose.onprem.yml up -d --build
 #
-# See DEPLOY_ONPREM.md for the full walkthrough.
+# If this server has NO internet egress (common on a segregated network),
+# build elsewhere, `docker save` the images (they're tagged zemen-backend:latest
+# / zemen-frontend:latest below), transfer + `docker load` here, then run
+# `docker compose -f docker-compose.onprem.yml up -d` WITHOUT --build — see
+# the "Offline / air-gapped deploy" section in DEPLOY_ONPREM.md.
 
 services:
   backend:
+    image: zemen-backend:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -39,6 +45,7 @@ services:
     #   - "127.0.0.1:3000:3000"
 
   frontend:
+    image: zemen-frontend:latest
     build:
       context: ../frontend
       dockerfile: Dockerfile
