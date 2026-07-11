@@ -77,7 +77,7 @@ doesn't need the `../frontend` source tree either):
 ssh user@10.1.2.136  "mkdir -p ~/zemen/backend/deploy/onprem"
 scp zemen-app-images.tar                                        user@10.1.2.136:~/zemen/
 scp docker-compose.onprem.yml                                    user@10.1.2.136:~/zemen/backend/
-scp deploy/onprem/backend.env.example deploy/onprem/minio.env.example  user@10.1.2.136:~/zemen/backend/deploy/onprem/
+scp deploy/onprem/backend.env.example deploy/onprem/minio.env.example deploy/onprem/onprem.env.example  user@10.1.2.136:~/zemen/backend/deploy/onprem/
 
 ssh user@10.1.2.21 "mkdir -p ~/deploy/db"
 scp zemen-db-image.tar                                           user@10.1.2.21:~/
@@ -101,12 +101,15 @@ docker load -i ~/zemen/zemen-app-images.tar
 cd ~/zemen/backend
 cp deploy/onprem/backend.env.example deploy/onprem/backend.env
 cp deploy/onprem/minio.env.example   deploy/onprem/minio.env
+cp deploy/onprem/onprem.env.example  deploy/onprem/onprem.env
 nano deploy/onprem/backend.env    # DATABASE_URL -> 10.1.2.21, JWT secrets, etc.
 nano deploy/onprem/minio.env      # must match S3_ACCESS_KEY/S3_SECRET_KEY above
-docker compose -f docker-compose.onprem.yml up -d    # NO --build — uses the loaded images
+nano deploy/onprem/onprem.env     # APP_HTTP_PORT if port 80 isn't allowed (default 8080)
+docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d    # NO --build — uses the loaded images
 ```
 
-Then browse `http://10.1.2.136` from the internal network. To ship a later
+Then browse `http://10.1.2.136:8080` (or your chosen port) from the internal
+network. To ship a later
 code change this way again, just repeat steps 1–5 (image tags are reused, so
 `docker load` replaces them in place).
 
@@ -157,24 +160,31 @@ git clone https://github.com/RobelBethelhem/independent_director_frontend.git fr
 cd backend
 cp deploy/onprem/backend.env.example deploy/onprem/backend.env
 cp deploy/onprem/minio.env.example   deploy/onprem/minio.env
+cp deploy/onprem/onprem.env.example  deploy/onprem/onprem.env
 nano deploy/onprem/backend.env   # DATABASE_URL (match the DB server's user/password),
                                  # JWT secrets (openssl rand -hex 32, twice),
-                                 # SEED_ADMIN_PASSWORD, SMTP_*, S3_ACCESS_KEY/S3_SECRET_KEY
+                                 # SEED_ADMIN_PASSWORD, SMTP_*, S3_ACCESS_KEY/S3_SECRET_KEY,
+                                 # and FRONTEND_ORIGIN (must include the port below)
 nano deploy/onprem/minio.env     # MINIO_ROOT_USER / MINIO_ROOT_PASSWORD —
                                  # MUST match S3_ACCESS_KEY / S3_SECRET_KEY above
+nano deploy/onprem/onprem.env    # APP_HTTP_PORT — only if port 80 isn't allowed
+                                 # on this server (defaults to 8080)
 
-docker compose -f docker-compose.onprem.yml up -d --build
-docker compose -f docker-compose.onprem.yml ps      # backend + frontend + minio, all healthy
+docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d --build
+docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml ps      # backend + frontend + minio, all healthy
 ```
 
-Open `http://10.1.2.136` from another machine on the internal network — you
-should see the portal, register/log in, and the admin account seeded from
+Open `http://10.1.2.136:8080` (or whatever port you set in `onprem.env`) from
+another machine on the internal network — you should see the portal,
+register/log in, and the admin account seeded from
 `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in `backend.env`.
 
 ### What's actually running
 
-- `frontend` (nginx, port **80**) — serves the built SPA and reverse-proxies
-  `/api/*` to the `backend` container. This is the only port you connect to.
+- `frontend` (nginx, listens on 80 *inside* the container) — serves the built
+  SPA and reverse-proxies `/api/*` to the `backend` container. Published to
+  the host on `APP_HTTP_PORT` (default **8080**, set in
+  `deploy/onprem/onprem.env`) — this is the only port you connect to.
 - `backend` (NestJS, port 3000) — **not published** to the host; reachable
   only from `frontend`/other containers via `http://backend:3000`. Uncomment
   the `ports:` line in `docker-compose.onprem.yml` only if you need to hit the
@@ -214,6 +224,7 @@ If you ever change `deploy/db/docker-compose.db.yml` or `postgres.env`, re-run
   exactly match `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in `minio.env`.
 - **502 from nginx** — the `backend` container isn't up yet or crashed:
   `docker logs zemen-backend`.
-- **Rebuild everything from scratch**: `docker compose -f docker-compose.onprem.yml down && docker compose -f docker-compose.onprem.yml up -d --build`
+- **Rebuild everything from scratch**: `docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml down && docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d --build`
   (this does **not** touch the Postgres volume on the DB server, so applicant
   data survives).
+- **Forgot `--env-file`** — running plain `docker compose -f docker-compose.onprem.yml ...` without `--env-file deploy/onprem/onprem.env` silently falls back to the default port (8080), which is usually fine, but won't pick up a custom `APP_HTTP_PORT` you've set. `deploy/onprem/deploy.sh` always passes it correctly.

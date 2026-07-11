@@ -15,10 +15,10 @@ echo "==> Pulling frontend (expected as a sibling folder: ../frontend)..."
 (cd ../frontend && git pull --ff-only)
 
 echo "==> Rebuilding & restarting containers..."
-docker compose -f docker-compose.onprem.yml up -d --build
+docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d --build
 
 echo "==> Pruning old images..."
 docker image prune -f >/dev/null
 
 echo "==> Status:"
-docker compose -f docker-compose.onprem.yml ps
+docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml ps

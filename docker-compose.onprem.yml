@@ -11,13 +11,19 @@
 # internet access to build the images directly:
 #   cp deploy/onprem/backend.env.example deploy/onprem/backend.env   # fill in real values
 #   cp deploy/onprem/minio.env.example   deploy/onprem/minio.env     # fill in real values
-#   docker compose -f docker-compose.onprem.yml up -d --build
+#   cp deploy/onprem/onprem.env.example  deploy/onprem/onprem.env    # host HTTP port (default 8080)
+#   docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d --build
 #
 # If this server has NO internet egress (common on a segregated network),
 # build elsewhere, `docker save` the images (they're tagged zemen-backend:latest
 # / zemen-frontend:latest below), transfer + `docker load` here, then run
-# `docker compose -f docker-compose.onprem.yml up -d` WITHOUT --build — see
-# the "Offline / air-gapped deploy" section in DEPLOY_ONPREM.md.
+# the same command WITHOUT --build — see the "Offline / air-gapped deploy"
+# section in DEPLOY_ONPREM.md.
+#
+# Always pass --env-file deploy/onprem/onprem.env (not relied on implicitly —
+# this repo also has an unrelated local-dev backend/.env, and Compose's
+# default auto-loaded ".env" would collide with it if we didn't say which
+# file we mean).
 
 services:
   backend:
@@ -54,8 +60,11 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    # Nginx listens on 80 *inside* the container regardless — only the
+    # host-facing port changes. Set APP_HTTP_PORT in deploy/onprem/onprem.env
+    # if port 80 isn't allowed on this server (defaults to 8080).
     ports:
-      - "80:80"
+      - "${APP_HTTP_PORT:-8080}:80"
 
   minio:
     image: minio/minio:latest
