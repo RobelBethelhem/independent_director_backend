@@ -1,4 +1,4 @@
-# On-prem deployment for the Application Server (10.1.1.94).
+# On-prem deployment for the Application Server (10.1.2.136).
 # Runs the API + frontend + document storage. Postgres is deliberately NOT
 # here — it lives on the segregated Database Server; see deploy/db/.
 #
@@ -72,7 +72,7 @@ services:
       timeout: 5s
       retries: 10
     # Console (bucket browser) reachable only from the app server itself;
-    # SSH-tunnel to it if you need to inspect uploaded files: ssh -L 9001:localhost:9001 user@10.1.1.94
+    # SSH-tunnel to it if you need to inspect uploaded files: ssh -L 9001:localhost:9001 user@10.1.2.136
     ports:
       - "127.0.0.1:9001:9001"
 

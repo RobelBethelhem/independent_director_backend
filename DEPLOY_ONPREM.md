@@ -5,10 +5,10 @@ Segregated two-server layout, fully independent of the Vercel/Render deployment
 
 | Server | IP | Role |
 |---|---|---|
-| **Application Server** | `10.1.1.94` | Docker: `backend` (NestJS API) + `frontend` (nginx serving the SPA, reverse-proxying `/api`) + `minio` (document storage) |
-| **Database Server** | `10.1.1.174` | Docker: `postgres` only |
+| **Application Server** | `10.1.2.136` | Docker: `backend` (NestJS API) + `frontend` (nginx serving the SPA, reverse-proxying `/api`) + `minio` (document storage) |
+| **Database Server** | `10.1.2.21` | Docker: `postgres` only |
 
-The app server talks to Postgres over the internal network at `10.1.1.174:3306`
+The app server talks to Postgres over the internal network at `10.1.2.21:3306`
 (the port opened on the DB server's firewall — Postgres itself still runs on
 its native 5432 *inside* the container; only the external mapping changed).
 Nothing here touches `render.yaml`, `../frontend/vercel.json`, or the existing
@@ -74,17 +74,17 @@ either server — the images are pre-built, and with a pre-loaded image, Compose
 doesn't need the `../frontend` source tree either):
 
 ```powershell
-ssh user@10.1.1.94  "mkdir -p ~/zemen/backend/deploy/onprem"
-scp zemen-app-images.tar                                        user@10.1.1.94:~/zemen/
-scp docker-compose.onprem.yml                                    user@10.1.1.94:~/zemen/backend/
-scp deploy/onprem/backend.env.example deploy/onprem/minio.env.example  user@10.1.1.94:~/zemen/backend/deploy/onprem/
+ssh user@10.1.2.136  "mkdir -p ~/zemen/backend/deploy/onprem"
+scp zemen-app-images.tar                                        user@10.1.2.136:~/zemen/
+scp docker-compose.onprem.yml                                    user@10.1.2.136:~/zemen/backend/
+scp deploy/onprem/backend.env.example deploy/onprem/minio.env.example  user@10.1.2.136:~/zemen/backend/deploy/onprem/
 
-ssh user@10.1.1.174 "mkdir -p ~/deploy/db"
-scp zemen-db-image.tar                                           user@10.1.1.174:~/
-scp deploy/db/docker-compose.db.yml deploy/db/postgres.env.example  user@10.1.1.174:~/deploy/db/
+ssh user@10.1.2.21 "mkdir -p ~/deploy/db"
+scp zemen-db-image.tar                                           user@10.1.2.21:~/
+scp deploy/db/docker-compose.db.yml deploy/db/postgres.env.example  user@10.1.2.21:~/deploy/db/
 ```
 
-**4. On the Database Server** (`ssh user@10.1.1.174`):
+**4. On the Database Server** (`ssh user@10.1.2.21`):
 
 ```bash
 docker load -i ~/zemen-db-image.tar
@@ -94,19 +94,19 @@ nano postgres.env                 # set POSTGRES_USER / POSTGRES_PASSWORD
 docker compose -f docker-compose.db.yml up -d
 ```
 
-**5. On the Application Server** (`ssh user@10.1.1.94`):
+**5. On the Application Server** (`ssh user@10.1.2.136`):
 
 ```bash
 docker load -i ~/zemen/zemen-app-images.tar
 cd ~/zemen/backend
 cp deploy/onprem/backend.env.example deploy/onprem/backend.env
 cp deploy/onprem/minio.env.example   deploy/onprem/minio.env
-nano deploy/onprem/backend.env    # DATABASE_URL -> 10.1.1.174, JWT secrets, etc.
+nano deploy/onprem/backend.env    # DATABASE_URL -> 10.1.2.21, JWT secrets, etc.
 nano deploy/onprem/minio.env      # must match S3_ACCESS_KEY/S3_SECRET_KEY above
 docker compose -f docker-compose.onprem.yml up -d    # NO --build — uses the loaded images
 ```
 
-Then browse `http://10.1.1.94` from the internal network. To ship a later
+Then browse `http://10.1.2.136` from the internal network. To ship a later
 code change this way again, just repeat steps 1–5 (image tags are reused, so
 `docker load` replaces them in place).
 
@@ -116,10 +116,10 @@ code change this way again, just repeat steps 1–5 (image tags are reused, so
 
 ---
 
-## 1. Database Server (10.1.1.174) — online path (needs internet egress from this server)
+## 1. Database Server (10.1.2.21) — online path (needs internet egress from this server)
 
 ```bash
-ssh user@10.1.1.174
+ssh user@10.1.2.21
 git clone https://github.com/RobelBethelhem/independent_director_backend.git
 cd independent_director_backend/deploy/db
 
@@ -133,23 +133,23 @@ docker compose -f docker-compose.db.yml ps      # should show "healthy"
 **Firewall it to the app server only** (`ufw` example — adjust for your distro):
 
 ```bash
-sudo ufw allow from 10.1.1.94 to any port 3306 proto tcp
+sudo ufw allow from 10.1.2.136 to any port 3306 proto tcp
 sudo ufw deny 3306
 ```
 
-The compose file also binds the published port to `10.1.1.174` specifically
+The compose file also binds the published port to `10.1.2.21` specifically
 (not `0.0.0.0`), so it's never reachable via another interface even without
 the firewall rule — the firewall is the second layer of defense.
 
 ---
 
-## 2. Application Server (10.1.1.94) — online path (needs internet egress from this server)
+## 2. Application Server (10.1.2.136) — online path (needs internet egress from this server)
 
 Clone **both** repos as sibling folders — the on-prem compose file expects
 `../frontend` to exist next to `backend`:
 
 ```bash
-ssh user@10.1.1.94
+ssh user@10.1.2.136
 mkdir -p ~/zemen && cd ~/zemen
 git clone https://github.com/RobelBethelhem/independent_director_backend.git backend
 git clone https://github.com/RobelBethelhem/independent_director_frontend.git frontend
@@ -167,7 +167,7 @@ docker compose -f docker-compose.onprem.yml up -d --build
 docker compose -f docker-compose.onprem.yml ps      # backend + frontend + minio, all healthy
 ```
 
-Open `http://10.1.1.94` from another machine on the internal network — you
+Open `http://10.1.2.136` from another machine on the internal network — you
 should see the portal, register/log in, and the admin account seeded from
 `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD` in `backend.env`.
 
@@ -180,7 +180,7 @@ should see the portal, register/log in, and the admin account seeded from
   the `ports:` line in `docker-compose.onprem.yml` only if you need to hit the
   API directly for debugging.
 - `minio` (S3-compatible storage for uploaded documents) — console on
-  `127.0.0.1:9001` only (SSH-tunnel in: `ssh -L 9001:localhost:9001 user@10.1.1.94`,
+  `127.0.0.1:9001` only (SSH-tunnel in: `ssh -L 9001:localhost:9001 user@10.1.2.136`,
   then browse `http://localhost:9001` from your machine).
 
 ---
@@ -208,8 +208,8 @@ If you ever change `deploy/db/docker-compose.db.yml` or `postgres.env`, re-run
 
 - **`backend` unhealthy / can't reach Postgres** — check `DATABASE_URL` in
   `deploy/onprem/backend.env` matches the DB server's real user/password/IP,
-  and that the DB server's firewall allows `10.1.1.94` on port 3306:
-  `docker logs zemen-backend`, and from the app server: `nc -zv 10.1.1.174 3306`.
+  and that the DB server's firewall allows `10.1.2.136` on port 3306:
+  `docker logs zemen-backend`, and from the app server: `nc -zv 10.1.2.21 3306`.
 - **Uploads fail** — `S3_ACCESS_KEY`/`S3_SECRET_KEY` in `backend.env` must
   exactly match `MINIO_ROOT_USER`/`MINIO_ROOT_PASSWORD` in `minio.env`.
 - **502 from nginx** — the `backend` container isn't up yet or crashed:

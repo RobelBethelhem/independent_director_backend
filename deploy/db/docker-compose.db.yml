@@ -1,12 +1,12 @@
-# On-prem deployment for the Database Server (10.1.1.174).
+# On-prem deployment for the Database Server (10.1.2.21).
 # Runs ONLY Postgres — deliberately segregated from the Application Server
-# (10.1.1.94), which runs the API/frontend/document storage. See ../onprem/.
+# (10.1.2.136), which runs the API/frontend/document storage. See ../onprem/.
 #
 # Usage (from this directory):
 #   cp postgres.env.example postgres.env   # fill in real values
 #   docker compose -f docker-compose.db.yml up -d
 #
-# The port is published bound to THIS server's own IP (10.1.1.174) only, so
+# The port is published bound to THIS server's own IP (10.1.2.21) only, so
 # it's never reachable via localhost tricks or another interface. Firewall it
 # further so only the app server can connect — see DEPLOY_ONPREM.md.
 #
@@ -22,7 +22,7 @@ services:
     env_file:
       - postgres.env
     ports:
-      - "10.1.1.174:3306:5432"
+      - "10.1.2.21:3306:5432"
     volumes:
       - zemen-pgdata:/var/lib/postgresql/data
     healthcheck:

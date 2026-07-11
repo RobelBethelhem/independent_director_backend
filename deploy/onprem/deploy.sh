@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run this ON the Application Server (10.1.1.94), from wherever the backend
+# Run this ON the Application Server (10.1.2.136), from wherever the backend
 # repo is cloned (e.g. ~/zemen/backend). Pulls the latest backend + frontend
 # code and rebuilds/restarts the on-prem stack.
 #

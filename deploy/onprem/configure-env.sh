@@ -28,8 +28,8 @@ urlencode() {
 }
 
 echo "=== Database connection (must match deploy/db/postgres.env on the DB server) ==="
-read -rp   "Database Server IP [10.1.1.174]: " DB_HOST
-DB_HOST=${DB_HOST:-10.1.1.174}
+read -rp   "Database Server IP [10.1.2.21]: " DB_HOST
+DB_HOST=${DB_HOST:-10.1.2.21}
 read -rp   "Database port [3306]: " DB_PORT
 DB_PORT=${DB_PORT:-3306}
 read -rp   "Database name [zemen_director_portal]: " DB_NAME
