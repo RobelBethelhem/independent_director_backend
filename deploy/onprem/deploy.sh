@@ -14,6 +14,8 @@ git pull --ff-only
 echo "==> Pulling frontend (expected as a sibling folder: ../frontend)..."
 (cd ../frontend && git pull --ff-only)
 
+[ -f deploy/onprem/onprem.env ] || cp deploy/onprem/onprem.env.example deploy/onprem/onprem.env
+
 echo "==> Rebuilding & restarting containers..."
 docker compose --env-file deploy/onprem/onprem.env -f docker-compose.onprem.yml up -d --build
 
