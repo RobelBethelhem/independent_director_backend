@@ -177,7 +177,7 @@ export class AuthService {
     const user = await this.users.findByEmail(dto.email);
     if (user) {
       const code = await this.issueOtp(user, OtpPurpose.Reset, OtpChannel.Email, true);
-      await this.notifications.sendPasswordReset(user.email, code);
+      await this.notifications.sendPasswordReset(user.email, user.phone, code);
     }
     return { ok: true };
   }
@@ -324,7 +324,7 @@ export class AuthService {
     });
 
     if (!skipSend) {
-      await this.notifications.sendOtp(user.email, code, channel);
+      await this.notifications.sendOtp(user.email, user.phone, code);
     }
     return code;
   }

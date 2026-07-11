@@ -42,6 +42,13 @@ export interface AppConfig {
     from: string;
     tlsInsecure: boolean;
   };
+  sms: {
+    url: string;
+    username: string;
+    password: string;
+    /** Sender ID / shortcode registered against this gateway account. */
+    from: string;
+  };
 }
 
 const bool = (v: string | undefined, fallback = false): boolean =>
@@ -94,5 +101,11 @@ export default (): AppConfig => ({
     from: process.env.MAIL_FROM ?? 'Zemen Bank <no-reply@zemen.test>',
     // DEV ONLY: skip TLS cert verification (for networks that intercept TLS).
     tlsInsecure: bool(process.env.SMTP_TLS_INSECURE, false),
+  },
+  sms: {
+    url: process.env.SMS_GATEWAY_URL ?? 'https://smsgateway.zemenbank.com/http-api/send',
+    username: process.env.SMS_USERNAME ?? '',
+    password: process.env.SMS_PASSWORD ?? '',
+    from: process.env.SMS_FROM ?? '',
   },
 });

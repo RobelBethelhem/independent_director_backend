@@ -4,10 +4,11 @@ import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
 /**
- * Transactional email sender. Sends via SMTP (Mailpit in dev, or a real provider
- * such as SendGrid/SES/Gmail in prod — just change the SMTP_* env vars). If the
- * SMTP server can't be reached it logs the message instead, so local dev never
- * blocks on mail delivery. (SMS is still a stub — wire a gateway/Twilio later.)
+ * Transactional email + SMS sender. Email sends via SMTP (Mailpit in dev, or a
+ * real provider such as SendGrid/SES/Gmail in prod — just change the SMTP_*
+ * env vars). SMS sends via the Bank's internal HTTP gateway (SMS_* env vars).
+ * If either isn't configured / can't be reached, the message is logged
+ * instead so a delivery failure never blocks the request flow.
  */
 @Injectable()
 export class NotificationsService implements OnModuleInit {
@@ -15,6 +16,10 @@ export class NotificationsService implements OnModuleInit {
   private transporter: Transporter;
   private from: string;
   private ready = false;
+  private smsUrl: string;
+  private smsUsername: string;
+  private smsPassword: string;
+  private smsFrom: string;
 
   constructor(private readonly config: ConfigService) {
     this.from = this.config.getOrThrow<string>('mail.from');
@@ -31,6 +36,13 @@ export class NotificationsService implements OnModuleInit {
     });
     if (tlsInsecure) {
       this.logger.warn('SMTP TLS verification DISABLED (SMTP_TLS_INSECURE=true) — dev only');
+    }
+    this.smsUrl = this.config.getOrThrow<string>('sms.url');
+    this.smsUsername = this.config.get<string>('sms.username') ?? '';
+    this.smsPassword = this.config.get<string>('sms.password') ?? '';
+    this.smsFrom = this.config.get<string>('sms.from') ?? '';
+    if (!this.smsUsername) {
+      this.logger.warn('SMS gateway not configured (SMS_USERNAME empty) — SMS will be logged only');
     }
   }
 
@@ -58,6 +70,39 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
+  /** Gateway expects a bare 251-prefixed number, no '+'. Handles both our own
+   *  +251-formatted numbers and a stray leading-0 local format defensively. */
+  private formatPhoneForSms(phone: string): string {
+    let p = phone.replace(/^\+/, '');
+    if (p.startsWith('0')) p = `251${p.slice(1)}`;
+    return p;
+  }
+
+  private async sendSms(phone: string, message: string): Promise<void> {
+    const to = this.formatPhoneForSms(phone);
+    if (!this.smsUsername) {
+      this.logger.log(`[sms:logged] to=${to} :: ${message}`);
+      return;
+    }
+    const url =
+      `${this.smsUrl}?username=${encodeURIComponent(this.smsUsername)}` +
+      `&password=${encodeURIComponent(this.smsPassword)}` +
+      `&to=${encodeURIComponent(to)}` +
+      `&from=${encodeURIComponent(this.smsFrom)}` +
+      `&coding=8&content=${encodeURIComponent(message)}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        this.logger.error(`[sms:failed] to=${to} status=${res.status}`);
+        return;
+      }
+      this.logger.log(`[sms:sent] to=${to}`);
+    } catch (err) {
+      // Never let an SMS failure break the request flow.
+      this.logger.error(`[sms:failed] to=${to} :: ${(err as Error).message}`);
+    }
+  }
+
   // ---- Branded HTML wrapper ----
   private layout(heading: string, body: string): string {
     return `<!doctype html><html><body style="margin:0;background:#f7f3ec;font-family:Arial,Helvetica,sans-serif;color:#1a1613">
@@ -74,27 +119,36 @@ export class NotificationsService implements OnModuleInit {
     </body></html>`;
   }
 
-  async sendOtp(to: string, code: string, channel: 'email' | 'sms'): Promise<void> {
-    if (channel === 'sms') {
-      this.logger.log(`[sms:stub] to=${to} code=${code}`);
-      return;
-    }
+  /** Sends the OTP over BOTH channels at once (best-effort, independent — a
+   *  failure on one never blocks or fails the other). `phone` is optional
+   *  since not every caller has it validated to hand. */
+  async sendOtp(email: string, phone: string | null | undefined, code: string): Promise<void> {
     const html = this.layout(
       'Verify your email',
       `<p style="font-size:14px;line-height:1.6;color:#57504a">Use this one-time code to verify your account and continue your application:</p>
        <div style="font-size:34px;font-weight:700;letter-spacing:.4em;text-align:center;color:#ed1d24;margin:18px 0;padding:14px;background:#fcebeb;border-radius:10px">${code}</div>
        <p style="font-size:13px;color:#8a827a">This code expires shortly. Do not share it with anyone.</p>`,
     );
-    await this.send(to, `Your Zemen verification code: ${code}`, html, `Your verification code is ${code}`);
+    await Promise.all([
+      this.send(email, `Your Zemen verification code: ${code}`, html, `Your verification code is ${code}`),
+      phone
+        ? this.sendSms(phone, `Zemen Bank Independent Director Portal: your verification code is ${code}.`)
+        : Promise.resolve(),
+    ]);
   }
 
-  async sendPasswordReset(to: string, code: string): Promise<void> {
+  async sendPasswordReset(email: string, phone: string | null | undefined, code: string): Promise<void> {
     const html = this.layout(
       'Reset your password',
       `<p style="font-size:14px;line-height:1.6;color:#57504a">Use this code to reset your password:</p>
        <div style="font-size:34px;font-weight:700;letter-spacing:.4em;text-align:center;color:#ed1d24;margin:18px 0;padding:14px;background:#fcebeb;border-radius:10px">${code}</div>`,
     );
-    await this.send(to, `Your Zemen password reset code: ${code}`, html, `Your reset code is ${code}`);
+    await Promise.all([
+      this.send(email, `Your Zemen password reset code: ${code}`, html, `Your reset code is ${code}`),
+      phone
+        ? this.sendSms(phone, `Zemen Bank Independent Director Portal: your password reset code is ${code}.`)
+        : Promise.resolve(),
+    ]);
   }
 
   async sendCredentials(to: string, role: string, tempPassword: string): Promise<void> {
