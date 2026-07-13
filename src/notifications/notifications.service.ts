@@ -30,6 +30,11 @@ export class NotificationsService implements OnModuleInit {
       port: this.config.getOrThrow<number>('mail.port'),
       secure: this.config.getOrThrow<boolean>('mail.secure'),
       auth: user ? { user, pass: this.config.get<string>('mail.pass') } : undefined,
+      // Fail fast instead of nodemailer's ~2min default — an unreachable SMTP
+      // host must never make app startup or a live send hang that long.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 10_000,
       // On TLS-intercepting networks the proxy's cert can't be verified; allow
       // skipping verification in dev only (SMTP_TLS_INSECURE=true).
       ...(tlsInsecure ? { tls: { rejectUnauthorized: false } } : {}),
@@ -46,7 +51,13 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  async onModuleInit(): Promise<void> {
+  /** Fire-and-forget: app startup (and its health check) must never be gated
+   *  on an external SMTP server responding — see the 10s timeouts above. */
+  onModuleInit(): void {
+    void this.checkSmtp();
+  }
+
+  private async checkSmtp(): Promise<void> {
     try {
       await this.transporter.verify();
       this.ready = true;
