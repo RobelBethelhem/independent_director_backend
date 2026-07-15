@@ -1,4 +1,4 @@
-import { IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, MaxLength, Min, ValidateIf } from 'class-validator';
 import { ApplicationStatus, MessageChannel, MessageTemplate, UserRole } from '../common/enums';
 
 export class CreateUserDto {
@@ -55,6 +55,18 @@ export class AdminSearchDto {
 export class UpdateStatusDto {
   @IsEnum(ApplicationStatus)
   status!: ApplicationStatus;
+}
+
+export class UpdateCycleSettingsDto {
+  @IsOptional() @IsDateString()
+  submissionCloseAt?: string;
+
+  // Explicit null clears the review deadline (reopens indefinitely); omit the
+  // field entirely to leave it unchanged.
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsDateString()
+  reviewCloseAt?: string | null;
 }
 
 export class SendMessageDto {

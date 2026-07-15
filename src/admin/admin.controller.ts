@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Header,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -19,6 +20,7 @@ import {
   AdminSearchDto,
   CreateUserDto,
   SendMessageDto,
+  UpdateCycleSettingsDto,
   UpdateStatusDto,
 } from './admin.dto';
 
@@ -86,12 +88,25 @@ export class AdminController {
   @Get('cycle')
   async cycle() {
     const c = await this.recruitment.getOrCreateActiveCycle();
+    const reviewActive = this.recruitment.isReviewActive(c);
     return {
       id: c.id,
       title: c.title,
       submissionCloseAt: c.submissionCloseAt,
+      reviewCloseAt: c.reviewCloseAt,
       reviewUnlocked: c.reviewUnlocked,
+      // Review is currently open for scoring.
+      reviewActive,
+      // Admin status-change controls are blocked: only once a review-close
+      // date is actually configured, and only while that window is active —
+      // see RecruitmentService.isReviewActive.
+      statusLocked: !!c.reviewCloseAt && reviewActive,
     };
+  }
+
+  @Patch('cycle/:id/settings')
+  updateCycleSettings(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateCycleSettingsDto) {
+    return this.recruitment.updateSettings(id, dto);
   }
 
   @Get('applications/:id')
@@ -136,5 +151,16 @@ export class AdminController {
   @Post('cycle/:id/open-review')
   openReview(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
     return this.admin.openReview(userId, id);
+  }
+
+  @Get('notifications/pending')
+  pendingNotifications() {
+    return this.admin.pendingNotifications();
+  }
+
+  @Post('notifications/send-bulk')
+  @HttpCode(200)
+  sendBulkNotifications(@CurrentUser('id') userId: string) {
+    return this.admin.sendBulkNotifications(userId);
   }
 }

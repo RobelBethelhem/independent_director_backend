@@ -67,17 +67,39 @@ export class NotificationsService implements OnModuleInit {
     }
   }
 
-  private async send(to: string, subject: string, html: string, text: string): Promise<void> {
+  /** Retries a transient failure once more after a short delay (2 attempts
+   *  total). Used for both email and SMS sends so a bulk batch's overall
+   *  delivery rate isn't at the mercy of a single flaky moment. */
+  private async withRetry<T>(op: () => Promise<T>, attempts = 2, delayMs = 1500): Promise<T> {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        return await op();
+      } catch (err) {
+        lastErr = err;
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    throw lastErr;
+  }
+
+  /** Returns true only if actually delivered via SMTP — false both when the
+   *  message was merely logged (SMTP unconfigured) and when a real send
+   *  attempt failed. Callers that need to track delivery (bulk sends) use
+   *  this; fire-and-forget callers (OTP, etc.) can ignore it. Never throws —
+   *  a mail failure must never break the caller's request flow. */
+  private async send(to: string, subject: string, html: string, text: string): Promise<boolean> {
     if (!this.ready) {
       this.logger.log(`[email:logged] to=${to} subject="${subject}" :: ${text}`);
-      return;
+      return false;
     }
     try {
-      const info = await this.transporter.sendMail({ from: this.from, to, subject, text, html });
+      const info = await this.withRetry(() => this.transporter.sendMail({ from: this.from, to, subject, text, html }));
       this.logger.log(`[email:sent] to=${to} subject="${subject}" id=${info.messageId}`);
+      return true;
     } catch (err) {
-      // Never let a mail failure break the request flow.
       this.logger.error(`[email:failed] to=${to} subject="${subject}" :: ${(err as Error).message}`);
+      return false;
     }
   }
 
@@ -89,11 +111,14 @@ export class NotificationsService implements OnModuleInit {
     return p;
   }
 
-  private async sendSms(phone: string, message: string): Promise<void> {
+  /** Same true-only-if-actually-delivered contract as send() above. A 10s
+   *  request timeout stops a hanging gateway from stalling an entire bulk
+   *  batch on one recipient. */
+  private async sendSms(phone: string, message: string): Promise<boolean> {
     const to = this.formatPhoneForSms(phone);
     if (!this.smsUsername) {
       this.logger.log(`[sms:logged] to=${to} :: ${message}`);
-      return;
+      return false;
     }
     const url =
       `${this.smsUrl}?username=${encodeURIComponent(this.smsUsername)}` +
@@ -102,15 +127,23 @@ export class NotificationsService implements OnModuleInit {
       `&from=${encodeURIComponent(this.smsFrom)}` +
       `&coding=8&content=${encodeURIComponent(message)}`;
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        this.logger.error(`[sms:failed] to=${to} status=${res.status}`);
-        return;
-      }
+      await this.withRetry(async () => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
+        try {
+          const res = await fetch(url, { signal: controller.signal });
+          if (!res.ok) {
+            throw new Error(`gateway returned ${res.status}`);
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      });
       this.logger.log(`[sms:sent] to=${to}`);
+      return true;
     } catch (err) {
-      // Never let an SMS failure break the request flow.
       this.logger.error(`[sms:failed] to=${to} :: ${(err as Error).message}`);
+      return false;
     }
   }
 
@@ -175,14 +208,24 @@ export class NotificationsService implements OnModuleInit {
     await this.send(to, 'Your Zemen Director Portal account', html, `Email: ${to} · Temporary password: ${tempPassword}`);
   }
 
-  async sendStatusUpdate(to: string, statusLabel: string): Promise<void> {
+  /** Sends over both channels; returns true if AT LEAST ONE actually
+   *  delivered (used by the bulk status-notification sender to decide
+   *  whether this applicant can be marked as notified, or must stay queued
+   *  for the next attempt). */
+  async sendStatusUpdate(email: string, phone: string | null | undefined, statusLabel: string): Promise<boolean> {
     const html = this.layout(
       'Application status updated',
       `<p style="font-size:14px;line-height:1.6;color:#57504a">There is an update to your Independent Director application. Its status is now:</p>
        <div style="font-size:16px;font-weight:700;text-align:center;margin:16px 0;padding:12px;background:#fbf8f2;border:1px solid #e7e0d4;border-radius:10px">${statusLabel}</div>
        <p style="font-size:13px;color:#8a827a">Sign in to your tracker for details.</p>`,
     );
-    await this.send(to, `Your Zemen application status: ${statusLabel}`, html, `Your application status is now ${statusLabel}`);
+    const [emailed, texted] = await Promise.all([
+      this.send(email, `Your Zemen application status: ${statusLabel}`, html, `Your application status is now ${statusLabel}`),
+      phone
+        ? this.sendSms(phone, `Zemen Bank Independent Director Portal: your application status is now "${statusLabel}".`)
+        : Promise.resolve(false),
+    ]);
+    return emailed || texted;
   }
 
   async sendMessageEmail(to: string, subject: string, body: string): Promise<void> {

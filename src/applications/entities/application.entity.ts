@@ -103,6 +103,16 @@ export class Application {
   @Column({ name: 'flags_count', type: 'int', default: 0 })
   flagsCount!: number;
 
+  /** Status-change notification queue (deliberately not sent immediately —
+   *  see AdminService.updateStatus). Set true on every status change, cleared
+   *  only once a bulk send actually succeeds for this row, so a failed
+   *  attempt simply stays queued for the next bulk send. */
+  @Column({ name: 'status_notification_pending', type: 'boolean', default: false })
+  statusNotificationPending!: boolean;
+
+  @Column({ name: 'status_notified_at', type: 'timestamptz', nullable: true })
+  statusNotifiedAt!: Date | null;
+
   // ---- Wizard progress (server-persisted so it resumes on any device) ----
   @Column({ name: 'current_step', type: 'int', default: 0 })
   currentStep!: number;

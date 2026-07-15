@@ -40,16 +40,23 @@ export class ReviewService {
   ) {}
 
   /** True when reviewers may access applications (window closed or admin-unlocked). */
-  private async isUnlocked(): Promise<{ unlocked: boolean; closeAt: Date }> {
+  private async isUnlocked(): Promise<{ unlocked: boolean; closeAt: Date; reviewCloseAt: Date | null; ended: boolean }> {
     const cycle = await this.recruitment.getOrCreateActiveCycle();
-    const unlocked = cycle.reviewUnlocked || Date.now() > new Date(cycle.submissionCloseAt).getTime();
-    return { unlocked, closeAt: cycle.submissionCloseAt };
+    const ended = !!cycle.reviewCloseAt && Date.now() > new Date(cycle.reviewCloseAt).getTime();
+    return {
+      unlocked: this.recruitment.isReviewActive(cycle),
+      closeAt: cycle.submissionCloseAt,
+      reviewCloseAt: cycle.reviewCloseAt,
+      ended,
+    };
   }
 
   private async ensureUnlocked(): Promise<void> {
-    const { unlocked } = await this.isUnlocked();
+    const { unlocked, ended } = await this.isUnlocked();
     if (!unlocked) {
-      throw new ForbiddenException('Review opens after the application window closes');
+      throw new ForbiddenException(
+        ended ? 'The review period has ended' : 'Review opens after the application window closes',
+      );
     }
   }
 
@@ -96,10 +103,20 @@ export class ReviewService {
   }
 
   async overview(reviewerId: string) {
-    const { unlocked, closeAt } = await this.isUnlocked();
+    const { unlocked, closeAt, reviewCloseAt, ended } = await this.isUnlocked();
     const pool = await this.pool();
     if (!unlocked) {
-      return { unlocked, closeAt, received: pool.length, toAssess: pool.length, reviewedByMe: 0, shortlisted: 0, criteriaCount: CRITERIA_COUNT };
+      return {
+        unlocked,
+        closeAt,
+        reviewCloseAt,
+        ended,
+        received: pool.length,
+        toAssess: pool.length,
+        reviewedByMe: 0,
+        shortlisted: 0,
+        criteriaCount: CRITERIA_COUNT,
+      };
     }
     const myReviews = await this.reviews.find({ where: { reviewerUserId: reviewerId } });
     const reviewedByMe = myReviews.filter((r) => r.submitted).length;
@@ -107,6 +124,8 @@ export class ReviewService {
     return {
       unlocked,
       closeAt,
+      reviewCloseAt,
+      ended,
       received: pool.length,
       toAssess: pool.length,
       reviewedByMe,

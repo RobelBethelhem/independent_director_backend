@@ -620,19 +620,86 @@ export class AdminService {
     if (!app || app.status === ApplicationStatus.Draft) {
       throw new NotFoundException('Application not found');
     }
+    const cycle = await this.recruitment.getById(app.cycleId);
+    if (cycle.reviewCloseAt && this.recruitment.isReviewActive(cycle)) {
+      throw new ForbiddenException(
+        `Status changes are locked while the review period is active (until ${cycle.reviewCloseAt.toISOString()}). Extend or end the review period to make changes.`,
+      );
+    }
     const from = app.status;
     app.status = dto.status;
+    // Notifications are deliberately NOT sent here — see sendBulkNotifications.
+    // Queuing instead of sending immediately lets the admin make a whole batch
+    // of decisions silently, then notify everyone at once after confirming.
+    app.statusNotificationPending = true;
     await this.apps.save(app);
     setAuditInfo({ entityType: 'application', entityId: id });
     setAuditMeta({ from, to: dto.status });
-    // Fire-and-forget so the UI (e.g. Kanban drag) responds instantly; email
-    // delivery shouldn't block the status change.
-    if (app.email) {
-      void this.notifications
-        .sendStatusUpdate(app.email, STATUS_LABELS[dto.status] ?? dto.status)
-        .catch(() => undefined);
-    }
     return { id, status: app.status };
+  }
+
+  /** Applications whose applicant hasn't yet been told about their latest
+   *  status change — for the admin's bulk-notification review screen. */
+  async pendingNotifications() {
+    const apps = await this.apps.find({
+      where: { statusNotificationPending: true },
+      order: { updatedAt: 'DESC' },
+    });
+    return apps.map((a) => ({
+      id: a.id,
+      reference: a.reference,
+      name: [a.title, a.firstName, a.lastName].filter(Boolean).join(' ') || a.reference || a.id,
+      status: a.status,
+      statusLabel: STATUS_LABELS[a.status] ?? a.status,
+      email: a.email,
+      phone: a.phone,
+    }));
+  }
+
+  /**
+   * Sends the queued status-change notification to every pending applicant,
+   * independently and concurrently (Promise.allSettled — one recipient's
+   * failure can never block or lose any other recipient's send). Applicants
+   * that fail (or whose email+SMS both turn out unconfigured/unreachable)
+   * simply stay queued, so re-running this later retries only what's left —
+   * no separate retry infrastructure needed, the database IS the queue.
+   */
+  async sendBulkNotifications(actorUserId: string) {
+    const pending = await this.apps.find({ where: { statusNotificationPending: true } });
+    const nameOf = (a: Application) => [a.title, a.firstName, a.lastName].filter(Boolean).join(' ') || a.reference || a.id;
+
+    const outcomes = await Promise.allSettled(
+      pending.map(async (a) => {
+        if (!a.email && !a.phone) {
+          throw new Error('no email or phone on file');
+        }
+        const delivered = await this.notifications.sendStatusUpdate(
+          a.email ?? '',
+          a.phone,
+          STATUS_LABELS[a.status] ?? a.status,
+        );
+        if (!delivered) {
+          throw new Error('email and SMS both failed or are unconfigured');
+        }
+        await this.apps.update({ id: a.id }, { statusNotificationPending: false, statusNotifiedAt: new Date() });
+        return a.id;
+      }),
+    );
+
+    const sent: string[] = [];
+    const failed: { id: string; name: string; reason: string }[] = [];
+    outcomes.forEach((outcome, i) => {
+      const a = pending[i];
+      if (outcome.status === 'fulfilled') {
+        sent.push(a.id);
+      } else {
+        failed.push({ id: a.id, name: nameOf(a), reason: (outcome.reason as Error).message });
+      }
+    });
+
+    setAuditInfo({ entityType: 'recruitment_cycle' });
+    setAuditMeta({ action: 'bulk_status_notifications', sentCount: sent.length, failedCount: failed.length });
+    return { sent: sent.length, total: pending.length, failed };
   }
 
   async sendMessage(actorUserId: string, id: string, dto: SendMessageDto) {

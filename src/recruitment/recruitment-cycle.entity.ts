@@ -28,6 +28,14 @@ export class RecruitmentCycle {
   @Column({ name: 'review_unlocked', type: 'boolean', default: false })
   reviewUnlocked!: boolean;
 
+  /** Null = no review deadline configured (reviewers may score indefinitely
+   *  once unlocked — the legacy behavior). Once set, reviewers can no longer
+   *  score/submit past this date, and admin's status-change controls lock for
+   *  the duration the review window is active (opens the moment this is set
+   *  and reviewUnlocked/submissionCloseAt has passed, through this date). */
+  @Column({ name: 'review_close_at', type: 'timestamptz', nullable: true })
+  reviewCloseAt!: Date | null;
+
   /** Per-cycle sequence backing the ZB-IDR-{year}-#### reference number. */
   @Column({ name: 'reference_seq', type: 'int', default: 0 })
   referenceSeq!: number;

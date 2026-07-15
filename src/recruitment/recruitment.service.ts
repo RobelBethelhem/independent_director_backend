@@ -41,6 +41,31 @@ export class RecruitmentService {
     return cycle;
   }
 
+  /** True while the review window is open for scoring: unlocked (manually or
+   *  because the application window closed) AND, if a review-close date is
+   *  set, not yet past it. */
+  isReviewActive(cycle: RecruitmentCycle): boolean {
+    const opened = cycle.reviewUnlocked || Date.now() > new Date(cycle.submissionCloseAt).getTime();
+    const ended = !!cycle.reviewCloseAt && Date.now() > new Date(cycle.reviewCloseAt).getTime();
+    return opened && !ended;
+  }
+
+  /** Admin-editable cycle dates. Only touches the fields actually passed —
+   *  either can be updated independently (e.g. extending reviewCloseAt alone). */
+  async updateSettings(
+    id: string,
+    dto: { submissionCloseAt?: string; reviewCloseAt?: string | null },
+  ): Promise<RecruitmentCycle> {
+    const cycle = await this.getById(id);
+    if (dto.submissionCloseAt !== undefined) {
+      cycle.submissionCloseAt = new Date(dto.submissionCloseAt);
+    }
+    if (dto.reviewCloseAt !== undefined) {
+      cycle.reviewCloseAt = dto.reviewCloseAt ? new Date(dto.reviewCloseAt) : null;
+    }
+    return this.cycles.save(cycle);
+  }
+
   /**
    * Atomically allocate the next zero-padded reference number for a cycle,
    * e.g. ZB-IDR-2026-0001. Uses a row-locking transaction to avoid collisions.
