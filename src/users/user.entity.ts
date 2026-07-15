@@ -56,6 +56,16 @@ export class User {
   @Column({ name: 'session_started_at', type: 'timestamptz', nullable: true })
   sessionStartedAt!: Date | null;
 
+  /** Identifies the single currently-valid session. Rotated on every fresh
+   *  login, cleared on logout, and stamped into every access/refresh token's
+   *  `sid` claim. JwtStrategy checks this on EVERY request — without it, an
+   *  already-issued access token stays cryptographically valid for its full
+   *  TTL even after single-sign-on supersedes or logs out that session,
+   *  which both lets a "replaced" device keep working for minutes and lets
+   *  it call /auth/logout and clobber the newer session's refresh token. */
+  @Column({ name: 'active_session_id', type: 'varchar', nullable: true })
+  activeSessionId!: string | null;
+
   /** TOTP (Google Authenticator-compatible) 2FA — available to every role
    *  except applicant. Secret is stored plain (standard practice for TOTP —
    *  it must be readable to verify codes, unlike a password hash) and only

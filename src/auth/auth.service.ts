@@ -341,6 +341,7 @@ export class AuthService {
     await this.consumeOtp(user, dto.code, OtpPurpose.Reset);
     user.passwordHash = await argon2.hash(dto.password);
     user.refreshTokenHash = null; // invalidate existing sessions
+    user.activeSessionId = null; // ...and any already-issued access token, immediately
     await this.users.save(user);
     await this.audit.record({
       actorUserId: user.id,
@@ -378,6 +379,7 @@ export class AuthService {
     const startedAt = user.sessionStartedAt?.getTime() ?? 0;
     if (Date.now() - startedAt > SESSION_MAX_MINUTES * 60_000) {
       user.refreshTokenHash = null;
+      user.activeSessionId = null;
       await this.users.save(user);
       throw new UnauthorizedException('Your session has expired — please sign in again');
     }
@@ -388,6 +390,11 @@ export class AuthService {
     const user = await this.users.findById(userId);
     if (user) {
       user.refreshTokenHash = null;
+      // Also kills the current access token immediately (JwtStrategy checks
+      // this every request) instead of leaving it valid until its own TTL —
+      // otherwise a logged-out token could keep working, including calling
+      // this very endpoint again and clobbering a different session's state.
+      user.activeSessionId = null;
       await this.users.save(user);
     }
     await this.audit.record({
@@ -404,14 +411,26 @@ export class AuthService {
   // ---- Internals ----
 
   /** freshLogin=true (password/2FA/session-confirm just completed) resets the
-   *  15-minute absolute-session clock; a token refresh (freshLogin=false)
-   *  deliberately leaves it untouched — that's what makes it an absolute cap
-   *  rather than just another idle timeout. */
+   *  15-minute absolute-session clock AND rotates activeSessionId — which is
+   *  what immediately invalidates every access/refresh token from whatever
+   *  session existed before (JwtStrategy checks activeSessionId on every
+   *  request, so this takes effect on the other session's very next call,
+   *  not just whenever it would next try to refresh). A token refresh
+   *  (freshLogin=false) deliberately leaves both untouched — that's what
+   *  makes the session cap absolute rather than just another idle timeout,
+   *  and keeps the refreshed token part of the same session. */
   private async issueSession(user: User, freshLogin: boolean): Promise<AuthSession> {
     if (freshLogin) {
       user.sessionStartedAt = new Date();
+      user.activeSessionId = randomUUID();
     }
-    const payload: AccessTokenPayload = { sub: user.id, email: user.email, role: user.role, jti: randomUUID() };
+    const payload: AccessTokenPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      jti: randomUUID(),
+      sid: user.activeSessionId!,
+    };
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('jwt.accessSecret'),
       expiresIn: this.config.getOrThrow<string>('jwt.accessTtl'),
