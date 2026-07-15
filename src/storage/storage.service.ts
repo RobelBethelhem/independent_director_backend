@@ -19,22 +19,27 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 @Injectable()
 export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
+  /** Container-to-container only (bucket setup, delete) — never handed to the browser. */
   private readonly client: S3Client;
+  /** Used ONLY to sign URLs the browser fetches directly (upload/download/preview) —
+   *  must point somewhere the browser can actually resolve, see configuration.ts. */
+  private readonly publicClient: S3Client;
   private readonly bucket: string;
   private readonly frontendOrigin: string;
 
   constructor(config: ConfigService) {
     this.bucket = config.getOrThrow<string>('storage.bucket');
     this.frontendOrigin = config.getOrThrow<string>('frontendOrigin');
-    this.client = new S3Client({
-      endpoint: config.getOrThrow<string>('storage.endpoint'),
+    const shared = {
       region: config.getOrThrow<string>('storage.region'),
       forcePathStyle: config.getOrThrow<boolean>('storage.forcePathStyle'),
       credentials: {
         accessKeyId: config.getOrThrow<string>('storage.accessKey'),
         secretAccessKey: config.getOrThrow<string>('storage.secretKey'),
       },
-    });
+    };
+    this.client = new S3Client({ endpoint: config.getOrThrow<string>('storage.endpoint'), ...shared });
+    this.publicClient = new S3Client({ endpoint: config.getOrThrow<string>('storage.publicEndpoint'), ...shared });
   }
 
   async onModuleInit(): Promise<void> {
@@ -81,7 +86,7 @@ export class StorageService implements OnModuleInit {
   /** Presigned URL the client PUTs the file bytes to (default 10 min). */
   presignUpload(key: string, contentType: string, expiresIn = 600): Promise<string> {
     return getSignedUrl(
-      this.client,
+      this.publicClient,
       new PutObjectCommand({ Bucket: this.bucket, Key: key, ContentType: contentType }),
       { expiresIn },
     );
@@ -96,7 +101,7 @@ export class StorageService implements OnModuleInit {
       ? `${inline ? 'inline' : 'attachment'}; filename="${filename}"`
       : undefined;
     return getSignedUrl(
-      this.client,
+      this.publicClient,
       new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,

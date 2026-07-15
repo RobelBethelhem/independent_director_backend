@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { TotpService } from './totp.service';
 import { Otp } from './otp.entity';
 import { UsersModule } from '../users/users.module';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
@@ -18,7 +19,7 @@ import { RecommendationsModule } from '../recommendations/recommendations.module
     RecommendationsModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
+  providers: [AuthService, JwtStrategy, TotpService],
   exports: [AuthService],
 })
 export class AuthModule {}

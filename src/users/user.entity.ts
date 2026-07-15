@@ -44,9 +44,27 @@ export class User {
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.Active })
   status!: UserStatus;
 
-  /** Hashed refresh token (rotation). Null when logged out. */
+  /** Hashed refresh token (rotation). Null when logged out. Single slot by
+   *  design — issuing a new one (a fresh login) invalidates any other
+   *  session, which is what makes single sign-on enforceable at all. */
   @Column({ name: 'refresh_token_hash', type: 'varchar', nullable: true })
   refreshTokenHash!: string | null;
+
+  /** Set once at fresh login (password [+ 2FA] [+ session-conflict confirm]),
+   *  never touched by refresh — the hard ceiling for the 15-minute absolute
+   *  session cap, enforced at refresh time regardless of activity. */
+  @Column({ name: 'session_started_at', type: 'timestamptz', nullable: true })
+  sessionStartedAt!: Date | null;
+
+  /** TOTP (Google Authenticator-compatible) 2FA — available to every role
+   *  except applicant. Secret is stored plain (standard practice for TOTP —
+   *  it must be readable to verify codes, unlike a password hash) and only
+   *  ever set once totpEnabled flips true via a confirmed setup. */
+  @Column({ name: 'totp_secret', type: 'varchar', nullable: true })
+  totpSecret!: string | null;
+
+  @Column({ name: 'totp_enabled', type: 'boolean', default: false })
+  totpEnabled!: boolean;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

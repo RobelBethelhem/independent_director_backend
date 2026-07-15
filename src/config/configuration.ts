@@ -17,6 +17,12 @@ export interface AppConfig {
     accessTtl: string;
     refreshSecret: string;
     refreshTtl: string;
+    /** Signs short-lived mid-login challenge tokens (2FA step, session-conflict
+     *  confirm step) — deliberately a DIFFERENT secret from accessSecret, not
+     *  just a different payload shape, so a challenge token can never pass
+     *  JwtStrategy's signature check even if someone tries sending it as a
+     *  Bearer token. No new env var: derived from accessSecret. */
+    challengeSecret: string;
   };
   otp: {
     ttlMinutes: number;
@@ -26,7 +32,15 @@ export interface AppConfig {
     devMode: boolean;
   };
   storage: {
+    /** Internal endpoint — only ever called container-to-container (bucket
+     *  setup, delete). Never handed to the browser. */
     endpoint: string;
+    /** Endpoint baked into presigned URLs, which the BROWSER fetches directly
+     *  — must be reachable from wherever the applicant/staff sit, not just
+     *  from inside the Docker network. Defaults to frontendOrigin, since the
+     *  on-prem nginx proxies the storage bucket path same-origin (see
+     *  frontend/nginx.conf) — no separate port/firewall rule needed. */
+    publicEndpoint: string;
     region: string;
     bucket: string;
     accessKey: string;
@@ -77,6 +91,7 @@ export default (): AppConfig => ({
     accessTtl: process.env.JWT_ACCESS_TTL ?? '15m',
     refreshSecret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
     refreshTtl: process.env.JWT_REFRESH_TTL ?? '7d',
+    challengeSecret: `${process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me'}::login-challenge`,
   },
   otp: {
     ttlMinutes: int(process.env.OTP_TTL_MINUTES, 10),
@@ -86,6 +101,11 @@ export default (): AppConfig => ({
   },
   storage: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
+    // Defaults to the internal endpoint itself — correct as-is for local dev
+    // (MinIO's port is published straight to the host) and for Render/S3/R2
+    // (already a real public URL). Only the on-prem deployment needs this
+    // set explicitly, since its S3_ENDPOINT is a Docker-internal hostname.
+    publicEndpoint: process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT ?? 'http://localhost:9000',
     region: process.env.S3_REGION ?? 'us-east-1',
     bucket: process.env.S3_BUCKET ?? 'zemen-documents',
     accessKey: process.env.S3_ACCESS_KEY ?? 'zemen',

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -26,6 +26,12 @@ export class RecommendationsService {
   async create(recommenderUserId: string, dto: CreateRecommendationDto) {
     const recommender = await this.users.getByIdOrThrow(recommenderUserId);
     const cycle = await this.recruitment.getOrCreateActiveCycle();
+    if (!this.recruitment.isAcceptingApplications(cycle)) {
+      throw new ForbiddenException(
+        'Recommendations can only be sent while applications are open — the window closed on ' +
+          cycle.submissionCloseAt.toISOString(),
+      );
+    }
     const token = randomBytes(24).toString('base64url');
     const rec = this.recs.create({
       recommenderUserId: recommender.id,

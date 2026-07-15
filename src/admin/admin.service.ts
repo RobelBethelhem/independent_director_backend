@@ -621,9 +621,11 @@ export class AdminService {
       throw new NotFoundException('Application not found');
     }
     const cycle = await this.recruitment.getById(app.cycleId);
-    if (cycle.reviewCloseAt && this.recruitment.isReviewActive(cycle)) {
+    if (this.recruitment.isStatusLocked(cycle)) {
       throw new ForbiddenException(
-        `Status changes are locked while the review period is active (until ${cycle.reviewCloseAt.toISOString()}). Extend or end the review period to make changes.`,
+        cycle.reviewCloseAt
+          ? `Status changes are locked until the review period ends (${cycle.reviewCloseAt.toISOString()}). Extend the review-close date in Review Settings if reviewers need more time.`
+          : 'Status changes are locked until a review-close date is set in Review Settings.',
       );
     }
     const from = app.status;
@@ -855,13 +857,4 @@ export class AdminService {
     };
   }
 
-  async openReview(actorUserId: string, cycleId: string) {
-    const cycle = await this.recruitment.getById(cycleId);
-    if (cycle.reviewUnlocked) {
-      throw new ForbiddenException('Review window already open');
-    }
-    await this.apps.manager.update('recruitment_cycles', { id: cycleId }, { reviewUnlocked: true });
-    setAuditInfo({ entityType: 'recruitment_cycle', entityId: cycleId });
-    return { id: cycleId, reviewUnlocked: true };
-  }
 }

@@ -3,8 +3,12 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser, AuthUser } from './decorators/current-user.decorator';
+import { UserRole } from '../common/enums';
 import {
   ChangePasswordDto,
+  ConfirmSessionDto,
+  ConfirmTotpSetupDto,
+  DisableTotpDto,
   ForgotPasswordDto,
   LoginDto,
   LogoutDto,
@@ -12,6 +16,7 @@ import {
   RegisterDto,
   ResendOtpDto,
   ResetPasswordDto,
+  Verify2FALoginDto,
   VerifyOtpDto,
 } from './dto/auth.dto';
 
@@ -51,6 +56,20 @@ export class AuthController {
 
   @Public()
   @HttpCode(200)
+  @Post('2fa/verify-login')
+  verifyTotpLogin(@Body() dto: Verify2FALoginDto) {
+    return this.auth.verifyTotpLogin(dto);
+  }
+
+  @Public()
+  @HttpCode(200)
+  @Post('login/confirm-session')
+  confirmSessionAndLogin(@Body() dto: ConfirmSessionDto) {
+    return this.auth.confirmSessionAndLogin(dto);
+  }
+
+  @Public()
+  @HttpCode(200)
   @Post('forgot-password')
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.auth.forgotPassword(dto);
@@ -83,6 +102,24 @@ export class AuthController {
     return this.auth.changePassword(userId, dto.currentPassword, dto.newPassword);
   }
 
+  @HttpCode(200)
+  @Post('2fa/setup')
+  setupTotp(@CurrentUser('id') userId: string) {
+    return this.auth.setupTotp(userId);
+  }
+
+  @HttpCode(200)
+  @Post('2fa/confirm')
+  confirmTotpSetup(@CurrentUser('id') userId: string, @Body() dto: ConfirmTotpSetupDto) {
+    return this.auth.confirmTotpSetup(userId, dto.code);
+  }
+
+  @HttpCode(200)
+  @Post('2fa/disable')
+  disableTotp(@CurrentUser('id') userId: string, @Body() dto: DisableTotpDto) {
+    return this.auth.disableTotp(userId, dto.password, dto.code);
+  }
+
   @Get('me')
   async me(@CurrentUser() current: AuthUser) {
     const user = await this.users.getByIdOrThrow(current.id);
@@ -95,6 +132,8 @@ export class AuthController {
       phoneVerified: user.phoneVerified,
       status: user.status,
       mustChangePassword: user.mustChangePassword,
+      twoFactorEnabled: user.totpEnabled,
+      twoFactorAvailable: user.role !== UserRole.Applicant,
     };
   }
 }

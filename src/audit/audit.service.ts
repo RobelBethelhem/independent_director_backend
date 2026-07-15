@@ -123,6 +123,17 @@ export class AuditService {
     };
   }
 
+  /** The IP/device of a user's most recent successful login — used to show
+   *  "you're already signed in elsewhere" details at single-sign-on time. */
+  async lastSuccessfulLogin(userId: string): Promise<{ ip: string | null; userAgent: string | null; at: string } | null> {
+    const row = await this.logs.findOne({
+      where: { actorUserId: userId, action: 'auth.login', outcome: 'success' },
+      order: { createdAt: 'DESC' },
+    });
+    if (!row) return null;
+    return { ip: row.ip, userAgent: row.userAgent, at: row.createdAt.toISOString() };
+  }
+
   /** Headline counts for the audit console. */
   async stats() {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);

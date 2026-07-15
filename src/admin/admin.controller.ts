@@ -88,19 +88,16 @@ export class AdminController {
   @Get('cycle')
   async cycle() {
     const c = await this.recruitment.getOrCreateActiveCycle();
-    const reviewActive = this.recruitment.isReviewActive(c);
     return {
       id: c.id,
       title: c.title,
       submissionCloseAt: c.submissionCloseAt,
       reviewCloseAt: c.reviewCloseAt,
-      reviewUnlocked: c.reviewUnlocked,
-      // Review is currently open for scoring.
-      reviewActive,
-      // Admin status-change controls are blocked: only once a review-close
-      // date is actually configured, and only while that window is active —
-      // see RecruitmentService.isReviewActive.
-      statusLocked: !!c.reviewCloseAt && reviewActive,
+      acceptingApplications: this.recruitment.isAcceptingApplications(c),
+      // Review is currently open for scoring (purely time-based, no manual override).
+      reviewActive: this.recruitment.isReviewActive(c),
+      // Admin status-change controls are blocked — see RecruitmentService.isStatusLocked.
+      statusLocked: this.recruitment.isStatusLocked(c),
     };
   }
 
@@ -146,11 +143,6 @@ export class AdminController {
     @Param('docId', ParseUUIDPipe) docId: string,
   ) {
     return this.admin.previewUrl(id, docId);
-  }
-
-  @Post('cycle/:id/open-review')
-  openReview(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
-    return this.admin.openReview(userId, id);
   }
 
   @Get('notifications/pending')

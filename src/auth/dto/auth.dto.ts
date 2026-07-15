@@ -90,3 +90,36 @@ export class LogoutDto {
   @IsString()
   refreshToken?: string;
 }
+
+// ---- Multi-step login (2FA / single-session confirm) ----
+
+export class Verify2FALoginDto {
+  @IsString() @IsNotEmpty()
+  challengeToken!: string;
+
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Enter the 6-digit code from your authenticator app' })
+  code!: string;
+}
+
+export class ConfirmSessionDto {
+  @IsString() @IsNotEmpty()
+  challengeToken!: string;
+}
+
+// ---- 2FA setup (authenticated) ----
+
+export class ConfirmTotpSetupDto {
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Enter the 6-digit code from your authenticator app' })
+  code!: string;
+}
+
+export class DisableTotpDto {
+  @IsString() @IsNotEmpty()
+  password!: string;
+
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Enter the 6-digit code from your authenticator app' })
+  code!: string;
+}

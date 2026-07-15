@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -9,14 +10,15 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import * as argon2 from 'argon2';
-import { randomInt } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
+import { TotpService } from './totp.service';
 import { User } from '../users/user.entity';
 import { Otp } from './otp.entity';
-import { OtpChannel, OtpPurpose, UserStatus } from '../common/enums';
+import { OtpChannel, OtpPurpose, UserRole, UserStatus } from '../common/enums';
 import { AccessTokenPayload } from './strategies/jwt.strategy';
 import {
   ForgotPasswordDto,
@@ -32,6 +34,18 @@ export interface AuthSession {
   user: { id: string; email: string; role: string; emailVerified: boolean; mustChangePassword: boolean };
 }
 
+/** Returned mid-login instead of a session when another factor/confirmation
+ *  is still needed. The frontend branches on which flag is present. */
+export interface LoginChallenge {
+  challengeToken: string;
+  twoFactorRequired?: true;
+  sessionConflict?: true;
+  existingSession?: { ip: string | null; userAgent: string | null; at: string };
+}
+
+/** Absolute session ceiling — enforced at refresh time regardless of activity. */
+const SESSION_MAX_MINUTES = 15;
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -39,6 +53,7 @@ export class AuthService {
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
     private readonly recommendations: RecommendationsService,
+    private readonly totp: TotpService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     @InjectRepository(Otp)
@@ -114,7 +129,7 @@ export class AuthService {
       entityType: 'user',
       entityId: user.id,
     });
-    return this.issueSession(user);
+    return this.issueSession(user, true);
   }
 
   async resendOtp(email: string): Promise<{ ok: true; devCode?: string }> {
@@ -129,7 +144,11 @@ export class AuthService {
 
   // ---- Login ----
 
-  async login(dto: LoginDto): Promise<AuthSession> {
+  /** Password check only. Returns a real session immediately if no further
+   *  factor is needed, or a short-lived challenge token if 2FA and/or a
+   *  single-sign-on conflict still needs resolving — see verifyTotpLogin /
+   *  confirmSessionAndLogin. */
+  async login(dto: LoginDto): Promise<AuthSession | LoginChallenge> {
     const user = await this.users.findByEmail(dto.email);
     if (!user || user.status === UserStatus.Disabled) {
       await this.recordLoginFailure(dto.email, user?.id, !user ? 'no_such_user' : 'account_disabled');
@@ -146,6 +165,57 @@ export class AuthService {
       await this.recordLoginFailure(dto.email, user.id, 'email_unverified');
       throw new UnauthorizedException('Email not verified — a new code has been sent');
     }
+    if (user.totpEnabled) {
+      return { twoFactorRequired: true, challengeToken: await this.signChallenge(user.id, 'totp') };
+    }
+    return this.afterFactorsVerified(user);
+  }
+
+  /** Second step when totpEnabled — verifies the authenticator code against
+   *  the challenge issued by login(), then proceeds exactly like login()
+   *  would have (including the single-sign-on conflict check). */
+  async verifyTotpLogin(dto: { challengeToken: string; code: string }): Promise<AuthSession | LoginChallenge> {
+    const userId = await this.verifyChallenge(dto.challengeToken, 'totp');
+    const user = await this.users.getByIdOrThrow(userId);
+    if (!user.totpSecret || !this.totp.verify(user.totpSecret, dto.code)) {
+      await this.recordLoginFailure(user.email, user.id, 'invalid_totp');
+      throw new UnauthorizedException('Invalid authentication code');
+    }
+    return this.afterFactorsVerified(user);
+  }
+
+  /** Final step when an existing active session was detected — the caller
+   *  has already seen and accepted "this will sign out your other session". */
+  async confirmSessionAndLogin(dto: { challengeToken: string }): Promise<AuthSession> {
+    const userId = await this.verifyChallenge(dto.challengeToken, 'session-confirm');
+    const user = await this.users.getByIdOrThrow(userId);
+    return this.completeLogin(user);
+  }
+
+  /** All password/2FA factors are satisfied — last gate is single sign-on. */
+  private async afterFactorsVerified(user: User): Promise<AuthSession | LoginChallenge> {
+    const conflict = await this.detectSessionConflict(user);
+    if (conflict) {
+      return {
+        sessionConflict: true,
+        challengeToken: await this.signChallenge(user.id, 'session-confirm'),
+        existingSession: conflict,
+      };
+    }
+    return this.completeLogin(user);
+  }
+
+  /** An existing session is "active" if a refresh token is on file — single
+   *  slot by design, so this is exactly "would issuing a new session here
+   *  sign someone else out". */
+  private async detectSessionConflict(
+    user: User,
+  ): Promise<{ ip: string | null; userAgent: string | null; at: string } | null> {
+    if (!user.refreshTokenHash) return null;
+    return this.audit.lastSuccessfulLogin(user.id);
+  }
+
+  private async completeLogin(user: User): Promise<AuthSession> {
     user.lastLoginAt = new Date();
     await this.users.save(user);
     await this.audit.record({
@@ -156,7 +226,7 @@ export class AuthService {
       entityType: 'user',
       entityId: user.id,
     });
-    return this.issueSession(user);
+    return this.issueSession(user, true);
   }
 
   private async recordLoginFailure(email: string, userId: string | undefined, reason: string): Promise<void> {
@@ -169,6 +239,87 @@ export class AuthService {
       entityId: userId,
       metadata: { reason },
     });
+  }
+
+  // ---- Two-factor authentication (TOTP) — every role except applicant ----
+
+  /** Generates a new secret and QR code. Not enabled yet — the user must
+   *  prove they scanned it correctly via confirmTotpSetup before it's active,
+   *  so a half-finished setup can never lock someone out of their own account. */
+  async setupTotp(userId: string): Promise<{ secret: string; qrDataUri: string }> {
+    const user = await this.users.getByIdOrThrow(userId);
+    if (user.role === UserRole.Applicant) {
+      throw new ForbiddenException('Two-factor authentication is only available to staff accounts');
+    }
+    const secret = this.totp.generateSecret();
+    user.totpSecret = secret;
+    user.totpEnabled = false;
+    await this.users.save(user);
+    const qrDataUri = await this.totp.buildQrDataUri(user.email, secret);
+    return { secret, qrDataUri };
+  }
+
+  async confirmTotpSetup(userId: string, code: string): Promise<{ ok: true }> {
+    const user = await this.users.getByIdOrThrow(userId);
+    if (!user.totpSecret || !this.totp.verify(user.totpSecret, code)) {
+      throw new UnauthorizedException('Invalid authentication code');
+    }
+    user.totpEnabled = true;
+    await this.users.save(user);
+    await this.audit.record({
+      actorUserId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: 'auth.totp_enabled',
+      entityType: 'user',
+      entityId: user.id,
+    });
+    return { ok: true };
+  }
+
+  async disableTotp(userId: string, password: string, code: string): Promise<{ ok: true }> {
+    const user = await this.users.getByIdOrThrow(userId);
+    const validPassword = await argon2.verify(user.passwordHash, password);
+    if (!validPassword || !user.totpSecret || !this.totp.verify(user.totpSecret, code)) {
+      throw new UnauthorizedException('Incorrect password or authentication code');
+    }
+    user.totpEnabled = false;
+    user.totpSecret = null;
+    await this.users.save(user);
+    await this.audit.record({
+      actorUserId: user.id,
+      actorEmail: user.email,
+      actorRole: user.role,
+      action: 'auth.totp_disabled',
+      entityType: 'user',
+      entityId: user.id,
+    });
+    return { ok: true };
+  }
+
+  // ---- Mid-login challenge tokens ----
+
+  /** Signed with a DIFFERENT secret from real access tokens (see
+   *  configuration.ts) so it can never pass JwtStrategy even if sent as a
+   *  Bearer token — these endpoints verify it manually instead. */
+  private signChallenge(userId: string, purpose: 'totp' | 'session-confirm'): Promise<string> {
+    return this.jwt.signAsync(
+      { sub: userId, purpose },
+      { secret: this.config.getOrThrow<string>('jwt.challengeSecret'), expiresIn: '5m' },
+    );
+  }
+
+  private async verifyChallenge(token: string, expectedPurpose: 'totp' | 'session-confirm'): Promise<string> {
+    let payload: { sub: string; purpose: string };
+    try {
+      payload = await this.jwt.verifyAsync(token, { secret: this.config.getOrThrow<string>('jwt.challengeSecret') });
+    } catch {
+      throw new UnauthorizedException('Your login attempt has expired — please sign in again');
+    }
+    if (payload.purpose !== expectedPurpose) {
+      throw new UnauthorizedException('Invalid login attempt');
+    }
+    return payload.sub;
   }
 
   // ---- Password reset ----
@@ -220,7 +371,17 @@ export class AuthService {
     if (!matches) {
       throw new UnauthorizedException('Invalid refresh token');
     }
-    return this.issueSession(user);
+    // Absolute session cap — enforced here regardless of how active the user
+    // has been, since refresh is the one thing every extended session must
+    // eventually pass through. Client-side idle/absolute timers give the UX
+    // (auto-redirect before this ever fires); this is the backend backstop.
+    const startedAt = user.sessionStartedAt?.getTime() ?? 0;
+    if (Date.now() - startedAt > SESSION_MAX_MINUTES * 60_000) {
+      user.refreshTokenHash = null;
+      await this.users.save(user);
+      throw new UnauthorizedException('Your session has expired — please sign in again');
+    }
+    return this.issueSession(user, false);
   }
 
   async logout(userId: string): Promise<{ ok: true }> {
@@ -242,8 +403,15 @@ export class AuthService {
 
   // ---- Internals ----
 
-  private async issueSession(user: User): Promise<AuthSession> {
-    const payload: AccessTokenPayload = { sub: user.id, email: user.email, role: user.role };
+  /** freshLogin=true (password/2FA/session-confirm just completed) resets the
+   *  15-minute absolute-session clock; a token refresh (freshLogin=false)
+   *  deliberately leaves it untouched — that's what makes it an absolute cap
+   *  rather than just another idle timeout. */
+  private async issueSession(user: User, freshLogin: boolean): Promise<AuthSession> {
+    if (freshLogin) {
+      user.sessionStartedAt = new Date();
+    }
+    const payload: AccessTokenPayload = { sub: user.id, email: user.email, role: user.role, jti: randomUUID() };
     const accessToken = await this.jwt.signAsync(payload, {
       secret: this.config.getOrThrow<string>('jwt.accessSecret'),
       expiresIn: this.config.getOrThrow<string>('jwt.accessTtl'),

@@ -239,6 +239,12 @@ export class ApplicationsService {
    */
   async submit(userId: string, id: string): Promise<Application> {
     const app = await this.assertEditableOwned(userId, id);
+    const cycle = await this.recruitment.getById(app.cycleId);
+    if (!this.recruitment.isAcceptingApplications(cycle)) {
+      throw new ForbiddenException(
+        'The application window has closed — submissions are no longer accepted for this recruitment cycle.',
+      );
+    }
     const full = (await this.getById(id))!;
     const errors = this.validateForSubmit(full);
     if (Object.keys(errors).length > 0) {

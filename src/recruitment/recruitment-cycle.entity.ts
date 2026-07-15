@@ -24,15 +24,15 @@ export class RecruitmentCycle {
   @Column({ name: 'submission_close_at', type: 'timestamptz' })
   submissionCloseAt!: Date;
 
-  /** Admin-controlled gate that opens the reviewer console (URS: review window). */
-  @Column({ name: 'review_unlocked', type: 'boolean', default: false })
-  reviewUnlocked!: boolean;
-
-  /** Null = no review deadline configured (reviewers may score indefinitely
-   *  once unlocked — the legacy behavior). Once set, reviewers can no longer
-   *  score/submit past this date, and admin's status-change controls lock for
-   *  the duration the review window is active (opens the moment this is set
-   *  and reviewUnlocked/submissionCloseAt has passed, through this date). */
+  /**
+   * When reviewers gain (and lose) access — purely time-based, no manual
+   * override: opens automatically the moment submissionCloseAt passes, closes
+   * automatically at reviewCloseAt. Nullable at the DB level for schema
+   * safety, but treated as mandatory at the application level — a cycle
+   * without one is deliberately kept conservative (admin status changes stay
+   * locked) until an admin sets it via Review Settings. See
+   * RecruitmentService.isReviewActive / isStatusLocked.
+   */
   @Column({ name: 'review_close_at', type: 'timestamptz', nullable: true })
   reviewCloseAt!: Date | null;
 

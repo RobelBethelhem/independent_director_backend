@@ -110,10 +110,12 @@ export class DemoSeedService implements OnApplicationBootstrap {
 
     // --- Applicants + applications ---
     const cycle = await this.recruitment.getOrCreateActiveCycle();
-    // Open the review window so reviewers can assess immediately.
-    await this.dataSource.manager
-      .update('recruitment_cycles', { id: cycle.id }, { reviewUnlocked: true })
-      .catch(() => undefined);
+    // Deliberately NOT backdating submissionCloseAt here: review access being
+    // time-based now means doing so would also block real applicants from
+    // submitting. Demo applications still seed fine either way (the reviewer
+    // pool is every non-draft application regardless of cycle dates) — an
+    // admin can adjust dates in Review Settings if they want to test the
+    // reviewer console immediately after seeding.
 
     const eduRepo = this.dataSource.getRepository(EducationEntry);
     const empRepo = this.dataSource.getRepository(EmploymentEntry);
