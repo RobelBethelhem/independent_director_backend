@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { AuthUser } from '../decorators/current-user.decorator';
-import { UserRole } from '../../common/enums';
+import { UserRole, UserStatus } from '../../common/enums';
 import { UsersService } from '../../users/users.service';
 
 export interface AccessTokenPayload {
@@ -48,6 +48,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const user = await this.users.findById(payload.sub);
     if (!user || !payload.sid || user.activeSessionId !== payload.sid) {
       throw new UnauthorizedException('Your session is no longer active — please sign in again');
+    }
+    // A user disabled mid-session loses access on their very next request,
+    // not only whenever their token would next refresh.
+    if (user.status === UserStatus.Disabled) {
+      throw new UnauthorizedException('This account has been disabled');
     }
     return { id: payload.sub, email: payload.email, role: payload.role };
   }

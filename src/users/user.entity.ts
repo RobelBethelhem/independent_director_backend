@@ -6,6 +6,7 @@ import {
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
+import { Exclude } from 'class-transformer';
 import { UserRole, UserStatus } from '../common/enums';
 import { Application } from '../applications/entities/application.entity';
 
@@ -25,6 +26,7 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   phone!: string | null;
 
+  @Exclude()
   @Column({ name: 'password_hash', type: 'varchar' })
   passwordHash!: string;
 
@@ -47,6 +49,7 @@ export class User {
   /** Hashed refresh token (rotation). Null when logged out. Single slot by
    *  design — issuing a new one (a fresh login) invalidates any other
    *  session, which is what makes single sign-on enforceable at all. */
+  @Exclude()
   @Column({ name: 'refresh_token_hash', type: 'varchar', nullable: true })
   refreshTokenHash!: string | null;
 
@@ -63,6 +66,7 @@ export class User {
    *  TTL even after single-sign-on supersedes or logs out that session,
    *  which both lets a "replaced" device keep working for minutes and lets
    *  it call /auth/logout and clobber the newer session's refresh token. */
+  @Exclude()
   @Column({ name: 'active_session_id', type: 'varchar', nullable: true })
   activeSessionId!: string | null;
 
@@ -70,6 +74,7 @@ export class User {
    *  except applicant. Secret is stored plain (standard practice for TOTP —
    *  it must be readable to verify codes, unlike a password hash) and only
    *  ever set once totpEnabled flips true via a confirmed setup. */
+  @Exclude()
   @Column({ name: 'totp_secret', type: 'varchar', nullable: true })
   totpSecret!: string | null;
 

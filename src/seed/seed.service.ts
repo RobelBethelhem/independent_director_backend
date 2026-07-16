@@ -17,8 +17,25 @@ export class SeedService implements OnApplicationBootstrap {
     const existing = await this.users.findByRole(UserRole.Admin);
     if (existing.length > 0) return;
 
+    const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
     const email = (process.env.SEED_ADMIN_EMAIL ?? 'admin@zemen.test').toLowerCase();
     const password = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe123!';
+
+    // Never seed a production admin with a missing, placeholder, or weak
+    // password — that would be a publicly-known credential (the default is in
+    // this repo). Fail loudly so the operator sets a real one.
+    if (isProduction) {
+      const insecure =
+        !process.env.SEED_ADMIN_PASSWORD ||
+        password.length < 12 ||
+        /change|replace|password|admin123/i.test(password);
+      if (insecure) {
+        throw new Error(
+          'Refusing to seed the initial admin: set SEED_ADMIN_PASSWORD to a strong, unique value (≥12 chars, not a placeholder).',
+        );
+      }
+    }
+
     await this.users.create({
       email,
       phone: null,
@@ -26,7 +43,10 @@ export class SeedService implements OnApplicationBootstrap {
       role: UserRole.Admin,
       name: 'Administrator',
       emailVerified: true,
+      // Force a password change on first login so even the operator-chosen seed
+      // password is never a standing credential.
+      mustChangePassword: true,
     });
-    this.logger.warn(`Seeded initial administrator "${email}". Sign in and change the password immediately.`);
+    this.logger.warn(`Seeded initial administrator "${email}". You must change the password on first sign-in.`);
   }
 }

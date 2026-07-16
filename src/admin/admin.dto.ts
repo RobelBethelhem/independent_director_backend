@@ -1,4 +1,4 @@
-import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { ApplicationStatus, MessageChannel, MessageTemplate, UserRole } from '../common/enums';
 
 export class CreateUserDto {
@@ -25,7 +25,7 @@ export class AdminListQueryDto {
   @IsOptional() @IsIn(['submitted', 'score', 'name'])
   sort?: 'submitted' | 'score' | 'name';
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsInt() @Min(1) @Max(100_000)
   page?: number;
 }
 
@@ -49,7 +49,7 @@ export class AdminSearchDto {
   @IsOptional() @IsString() @MaxLength(40) submittedFrom?: string;
   @IsOptional() @IsString() @MaxLength(40) submittedTo?: string;
   @IsOptional() @IsIn(['submitted', 'score', 'name', 'years', 'flags']) sort?: string;
-  @IsOptional() @IsInt() @Min(1) page?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(100_000) page?: number;
 }
 
 export class UpdateStatusDto {

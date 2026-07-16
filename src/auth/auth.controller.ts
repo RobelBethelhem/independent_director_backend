@@ -1,9 +1,20 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { Public } from './decorators/public.decorator';
 import { CurrentUser, AuthUser } from './decorators/current-user.decorator';
 import { UserRole } from '../common/enums';
+
+/** Per-IP rate limits on unauthenticated auth endpoints — defense against
+ *  credential stuffing and OTP/2FA/reset-code brute force. 20/min is tolerant
+ *  of many legitimate staff sharing one office/NAT IP while still capping
+ *  automated guessing (the OTP's 5-attempts-per-code + 6-digit length is the
+ *  primary code-guessing defense; this is the outer layer). */
+const AUTH_THROTTLE = { default: { limit: 20, ttl: 60_000 } };
+/** Tighter for code-ISSUING endpoints, to blunt OTP spraying and the
+ *  re-issue-to-reset-attempts amplification (a fresh code resets maxAttempts). */
+const CODE_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
 import {
   ChangePasswordDto,
   ConfirmSessionDto,
@@ -28,12 +39,14 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle(CODE_THROTTLE)
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto);
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('verify-otp')
   verifyOtp(@Body() dto: VerifyOtpDto) {
@@ -41,6 +54,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(CODE_THROTTLE)
   @HttpCode(200)
   @Post('resend-otp')
   resendOtp(@Body() dto: ResendOtpDto) {
@@ -48,6 +62,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('login')
   login(@Body() dto: LoginDto) {
@@ -55,6 +70,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('2fa/verify-login')
   verifyTotpLogin(@Body() dto: Verify2FALoginDto) {
@@ -62,6 +78,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('login/confirm-session')
   confirmSessionAndLogin(@Body() dto: ConfirmSessionDto) {
@@ -69,6 +86,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(CODE_THROTTLE)
   @HttpCode(200)
   @Post('forgot-password')
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -76,6 +94,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
@@ -83,6 +102,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle(AUTH_THROTTLE)
   @HttpCode(200)
   @Post('refresh')
   refresh(@Body() dto: RefreshDto) {

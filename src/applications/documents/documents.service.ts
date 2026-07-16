@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -11,7 +12,7 @@ import { ApplicationsService } from '../applications.service';
 import { StorageService } from '../../storage/storage.service';
 import { DocumentScanService } from './document-scan.service';
 import { PresignDto, RecordDocumentDto } from './documents.dto';
-import { allowedMimesFor, MAX_DOC_SIZE_BYTES } from './document.constants';
+import { allowedMimesFor, MAX_DOC_SIZE_BYTES, MAX_DOCS_PER_APPLICATION } from './document.constants';
 import { DocType } from '../../common/enums';
 
 @Injectable()
@@ -41,6 +42,13 @@ export class DocumentsService {
     return filename.replace(/[^\w.\-]+/g, '_').slice(-120);
   }
 
+  /** Display filename kept for the user, with anything that could poison a
+   *  Content-Disposition header or a UI render stripped. Storage keys use
+   *  `sanitize()`; this is the human-facing name we persist and echo back. */
+  private sanitizeDisplayName(filename: string): string {
+    return filename.replace(/[\r\n"\\<>]+/g, '_').slice(0, 200) || 'document';
+  }
+
   /** Step 1 of upload: validate, mint a storage key, return a presigned PUT URL. */
   async presign(userId: string, appId: string, dto: PresignDto) {
     await this.applications.assertOwnedEditable(userId, appId);
@@ -57,6 +65,29 @@ export class DocumentsService {
     if (!dto.storageKey.startsWith(`applications/${appId}/`)) {
       throw new BadRequestException('storageKey does not belong to this application');
     }
+    // The client-declared size/mime are advisory — a presigned PUT can't cap
+    // size, so verify what was ACTUALLY stored before trusting it. Fail closed:
+    // reject (and clean up) an object that's missing, oversized, or whose real
+    // content-type isn't an allowed type for this slot.
+    let head: { size: number; contentType?: string };
+    try {
+      head = await this.storage.headObject(dto.storageKey);
+    } catch {
+      throw new BadRequestException('Uploaded file could not be verified — please try the upload again.');
+    }
+    if (head.size > MAX_DOC_SIZE_BYTES) {
+      await this.storage.delete(dto.storageKey).catch(() => undefined);
+      throw new BadRequestException('File exceeds the 10 MB limit.');
+    }
+    if (head.contentType && !allowedMimesFor(dto.docType).includes(head.contentType)) {
+      await this.storage.delete(dto.storageKey).catch(() => undefined);
+      throw new BadRequestException('Uploaded file type does not match what was declared.');
+    }
+    // Bound total documents per application (storage-abuse guard).
+    if ((await this.docs.count({ where: { applicationId: appId } })) >= MAX_DOCS_PER_APPLICATION) {
+      await this.storage.delete(dto.storageKey).catch(() => undefined);
+      throw new BadRequestException('Too many documents on this application.');
+    }
     // Single-file slots: one profile photo per application, and one certificate /
     // work letter per entry. Replace any previous file in that slot so re-uploading
     // doesn't pile up duplicates.
@@ -66,10 +97,10 @@ export class DocumentsService {
       docType: dto.docType,
       educationEntryId: dto.educationEntryId ?? null,
       employmentEntryId: dto.employmentEntryId ?? null,
-      originalFilename: dto.originalFilename,
+      originalFilename: this.sanitizeDisplayName(dto.originalFilename),
       storageKey: dto.storageKey,
       mimeType: dto.mimeType,
-      sizeBytes: String(dto.sizeBytes),
+      sizeBytes: String(head.size),
       scannedClean: false,
     });
     const saved = await this.docs.save(doc);
@@ -119,6 +150,7 @@ export class DocumentsService {
     if (!doc) {
       throw new NotFoundException('Document not found');
     }
+    assertServable(doc);
     const url = await this.storage.presignDownload(doc.storageKey, doc.originalFilename);
     return { url };
   }
@@ -134,7 +166,17 @@ export class DocumentsService {
     if (!doc) {
       throw new NotFoundException('Document not found');
     }
+    assertServable(doc);
     const url = await this.storage.presignDownload(doc.storageKey, doc.originalFilename, 300, true);
     return { url, mimeType: doc.mimeType, filename: doc.originalFilename };
+  }
+}
+
+/** No document is handed out (to the applicant, admin, or reviewer) until the
+ *  malware scan has cleared it — the `scanned_clean` flag must be enforced on
+ *  the serving path, not just consulted at submission time. */
+export function assertServable(doc: ApplicationDocument): void {
+  if (!doc.scannedClean) {
+    throw new ConflictException('This document is still being processed. Please try again shortly.');
   }
 }

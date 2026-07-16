@@ -73,7 +73,51 @@ const int = (v: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
-export default (): AppConfig => ({
+const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
+
+/** Values that must never survive into a production deployment. Includes the
+ *  in-code dev fallbacks below and the placeholders shipped in the *.env.example
+ *  files, so a half-configured deploy fails loudly instead of booting insecure. */
+const INSECURE_SECRET_MARKERS = ['change-me', 'changeme', 'replace_me', 'dev-', 'secret', 'password', 'zemen-secret'];
+
+const looksInsecure = (value: string | undefined): boolean => {
+  if (!value || value.length < 16) return true;
+  const lower = value.toLowerCase();
+  return INSECURE_SECRET_MARKERS.some((m) => lower.includes(m));
+};
+
+/**
+ * Fail-fast boot guard. A production instance that starts with a default,
+ * placeholder, missing, too-short, or reused secret is trivially forgeable
+ * (JWTs) or accessible (storage) — refuse to start rather than run insecure.
+ */
+function assertProductionSecrets(cfg: AppConfig): void {
+  if (!isProduction) return;
+  const problems: string[] = [];
+  if (looksInsecure(process.env.JWT_ACCESS_SECRET)) {
+    problems.push('JWT_ACCESS_SECRET is unset, too short (<16), or a known/placeholder value');
+  }
+  if (looksInsecure(process.env.JWT_REFRESH_SECRET)) {
+    problems.push('JWT_REFRESH_SECRET is unset, too short (<16), or a known/placeholder value');
+  }
+  if (process.env.JWT_ACCESS_SECRET && process.env.JWT_ACCESS_SECRET === process.env.JWT_REFRESH_SECRET) {
+    problems.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must differ');
+  }
+  if (looksInsecure(process.env.S3_SECRET_KEY)) {
+    problems.push('S3_SECRET_KEY is unset, too short, or a known/placeholder value');
+  }
+  if (cfg.otp.devMode) {
+    problems.push('OTP_DEV_MODE must never be enabled in production (it echoes verification codes in API responses)');
+  }
+  if (problems.length) {
+    throw new Error(
+      `Refusing to start: insecure production configuration:\n  - ${problems.join('\n  - ')}\n` +
+        'Set strong, unique secrets (e.g. `openssl rand -hex 32`) in the environment.',
+    );
+  }
+}
+
+const buildConfig = (): AppConfig => ({
   env: process.env.NODE_ENV ?? 'development',
   port: int(process.env.PORT, 3000),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
@@ -96,8 +140,11 @@ export default (): AppConfig => ({
   otp: {
     ttlMinutes: int(process.env.OTP_TTL_MINUTES, 10),
     maxAttempts: int(process.env.OTP_MAX_ATTEMPTS, 5),
-    length: int(process.env.OTP_LENGTH, 4),
-    devMode: bool(process.env.OTP_DEV_MODE, false),
+    length: int(process.env.OTP_LENGTH, 6),
+    // Never honour dev-mode (which returns the OTP in the API response) in
+    // production, regardless of what the env says — an unverified email is the
+    // whole point of the OTP, and echoing it back defeats account ownership.
+    devMode: isProduction ? false : bool(process.env.OTP_DEV_MODE, false),
   },
   storage: {
     endpoint: process.env.S3_ENDPOINT ?? 'http://localhost:9000',
@@ -129,3 +176,9 @@ export default (): AppConfig => ({
     from: process.env.SMS_FROM ?? '',
   },
 });
+
+export default (): AppConfig => {
+  const cfg = buildConfig();
+  assertProductionSecrets(cfg);
+  return cfg;
+};

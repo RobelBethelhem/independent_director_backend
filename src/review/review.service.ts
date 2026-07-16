@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -380,6 +381,10 @@ export class ReviewService {
     const doc = await this.docs.findOne({ where: { id: docId, applicationId: appId } });
     if (!doc) {
       throw new NotFoundException('Document not found');
+    }
+    // Never hand a not-yet-scanned file to the review committee.
+    if (!doc.scannedClean) {
+      throw new ConflictException('This document is still being processed.');
     }
     return doc;
   }

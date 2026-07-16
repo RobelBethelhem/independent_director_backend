@@ -1,8 +1,8 @@
-import { IsIn, IsInt, IsOptional, IsString, Min, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Max, Min, MaxLength } from 'class-validator';
 import { UserRole } from '../common/enums';
 
 export class AuditQueryDto {
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsInt() @Min(1) @Max(100_000)
   page?: number;
 
   @IsOptional() @IsString() @MaxLength(200)

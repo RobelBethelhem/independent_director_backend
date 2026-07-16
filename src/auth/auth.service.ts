@@ -46,6 +46,13 @@ export interface LoginChallenge {
 /** Absolute session ceiling — enforced at refresh time regardless of activity. */
 const SESSION_MAX_MINUTES = 15;
 
+/** A real argon2 hash of a throwaway value. When login is attempted for an
+ *  unknown/disabled account we still run argon2.verify against this so the
+ *  response time matches the real-user path — closing the timing side-channel
+ *  that would otherwise reveal which emails have accounts. */
+const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=65536,t=3,p=4$DtPhu4aDOp7vmPRa9LS1Xg$uJRu9qwKd4HfSq4fL1pjRMoWf0e2I8WkHRGaT4d233Y';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -68,7 +75,14 @@ export class AuthService {
     return this.config.get<boolean>('otp.devMode') ?? false;
   }
 
-  async register(dto: RegisterDto): Promise<{ email: string; otpRequired: true; devCode?: string }> {
+  /** Number of digits in an email OTP — surfaced to the client so the
+   *  verify-code UI renders the right number of inputs regardless of the
+   *  server's configured OTP_LENGTH. */
+  private get otpLength(): number {
+    return this.config.getOrThrow<number>('otp.length');
+  }
+
+  async register(dto: RegisterDto): Promise<{ email: string; otpRequired: true; otpLength: number; devCode?: string }> {
     const existing = await this.users.findByEmail(dto.email);
     if (existing) {
       throw new ConflictException('An account with this email already exists');
@@ -92,7 +106,7 @@ export class AuthService {
       entityId: user.id,
       metadata: dto.recommendationToken ? { viaRecommendation: true } : undefined,
     });
-    return { email: user.email, otpRequired: true, ...(this.devMode ? { devCode: code } : {}) };
+    return { email: user.email, otpRequired: true, otpLength: this.otpLength, ...(this.devMode ? { devCode: code } : {}) };
   }
 
   async verifyOtp(dto: VerifyOtpDto): Promise<AuthSession> {
@@ -132,14 +146,14 @@ export class AuthService {
     return this.issueSession(user, true);
   }
 
-  async resendOtp(email: string): Promise<{ ok: true; devCode?: string }> {
+  async resendOtp(email: string): Promise<{ ok: true; otpLength: number; devCode?: string }> {
     const user = await this.users.findByEmail(email);
     // Don't leak whether the account exists.
     if (user && !user.emailVerified) {
       const code = await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
-      if (this.devMode) return { ok: true, devCode: code };
+      if (this.devMode) return { ok: true, otpLength: this.otpLength, devCode: code };
     }
-    return { ok: true };
+    return { ok: true, otpLength: this.otpLength };
   }
 
   // ---- Login ----
@@ -151,6 +165,9 @@ export class AuthService {
   async login(dto: LoginDto): Promise<AuthSession | LoginChallenge> {
     const user = await this.users.findByEmail(dto.email);
     if (!user || user.status === UserStatus.Disabled) {
+      // Equalize timing with the real-user path (argon2 is the expensive step)
+      // so an attacker can't distinguish "no such account" from "wrong password".
+      await argon2.verify(DUMMY_PASSWORD_HASH, dto.password).catch(() => false);
       await this.recordLoginFailure(dto.email, user?.id, !user ? 'no_such_user' : 'account_disabled');
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -365,7 +382,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
     const user = await this.users.findById(payload.sub);
-    if (!user || !user.refreshTokenHash) {
+    if (!user || !user.refreshTokenHash || user.status === UserStatus.Disabled) {
       throw new UnauthorizedException('Invalid refresh token');
     }
     const matches = await argon2.verify(user.refreshTokenHash, refreshToken);

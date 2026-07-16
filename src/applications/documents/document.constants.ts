@@ -3,6 +3,11 @@ import { DocType } from '../../common/enums';
 /** Upload limits: official documents must be PDF, ≤10 MB each. */
 export const MAX_DOC_SIZE_BYTES = 10 * 1024 * 1024;
 
+/** Hard cap on documents per application — bounds storage abuse from an
+ *  authenticated applicant looping presign+record on a draft. Generous vs. the
+ *  realistic need (photo + IDs + one cert/letter per education/employment entry). */
+export const MAX_DOCS_PER_APPLICATION = 60;
+
 /** Profile photos may be common web image formats. */
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 

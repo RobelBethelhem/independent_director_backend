@@ -17,8 +17,9 @@ services:
         value: "true"          # auto-creates the schema on first boot
       - key: DB_SSL
         value: "true"          # managed Postgres requires TLS
-      - key: OTP_DEV_MODE
-        value: "true"          # email is off on this test deploy → return the OTP so testers can sign up
+      # NOTE: OTP_DEV_MODE is intentionally NOT set here. It echoes verification
+      # codes in API responses and is hard-disabled in production by the app
+      # (see config/configuration.ts) — configure SMTP_* below to send real codes.
       - key: DATABASE_URL
         fromDatabase:
           name: zemen-db

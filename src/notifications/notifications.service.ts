@@ -20,8 +20,12 @@ export class NotificationsService implements OnModuleInit {
   private smsUsername: string;
   private smsPassword: string;
   private smsFrom: string;
+  /** Never write OTP/reset codes or temp passwords to logs in production. In
+   *  dev the body is logged so testers without SMTP can read the code. */
+  private readonly logMessageBodies: boolean;
 
   constructor(private readonly config: ConfigService) {
+    this.logMessageBodies = this.config.get<string>('env') !== 'production';
     this.from = this.config.getOrThrow<string>('mail.from');
     const user = this.config.get<string>('mail.user');
     const tlsInsecure = this.config.get<boolean>('mail.tlsInsecure');
@@ -90,7 +94,10 @@ export class NotificationsService implements OnModuleInit {
    *  a mail failure must never break the caller's request flow. */
   private async send(to: string, subject: string, html: string, text: string): Promise<boolean> {
     if (!this.ready) {
-      this.logger.log(`[email:logged] to=${to} subject="${subject}" :: ${text}`);
+      // Body (which may contain an OTP/reset code) is logged in dev only.
+      this.logger.log(
+        `[email:logged] to=${to} subject="${subject}"${this.logMessageBodies ? ` :: ${text}` : ''}`,
+      );
       return false;
     }
     try {
@@ -117,7 +124,8 @@ export class NotificationsService implements OnModuleInit {
   private async sendSms(phone: string, message: string): Promise<boolean> {
     const to = this.formatPhoneForSms(phone);
     if (!this.smsUsername) {
-      this.logger.log(`[sms:logged] to=${to} :: ${message}`);
+      // Body (which may contain an OTP/reset code) is logged in dev only.
+      this.logger.log(`[sms:logged] to=${to}${this.logMessageBodies ? ` :: ${message}` : ''}`);
       return false;
     }
     const url =

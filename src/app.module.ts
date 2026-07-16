@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -25,6 +26,9 @@ import { StorageModule } from './storage/storage.module';
       isGlobal: true,
       load: [configuration],
     }),
+    // Baseline per-IP DoS backstop (300 req/min); auth endpoints tighten this
+    // dramatically via @Throttle() to stop credential/OTP/2FA brute force.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -50,6 +54,9 @@ import { StorageModule } from './storage/storage.module';
     SeedModule,
   ],
   providers: [
+    // Runs first: rate-limit before auth so unauthenticated brute force is
+    // capped before it ever reaches password/OTP verification.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Secure-by-default: every route requires a valid JWT unless marked @Public(),
     // then role checks run via @Roles().
     { provide: APP_GUARD, useClass: JwtAuthGuard },

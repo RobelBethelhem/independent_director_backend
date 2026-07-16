@@ -1,14 +1,32 @@
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  const isProduction = config.get<string>('env') === 'production';
 
-  // Honour X-Forwarded-For (req.ip) when running behind a reverse proxy.
-  app.getHttpAdapter().getInstance().set('trust proxy', true);
+  // Trust exactly ONE proxy hop (the nginx/Render edge that terminates the
+  // client connection). Using `true` would trust any client-supplied
+  // X-Forwarded-For, letting attackers spoof the source IP to evade per-IP
+  // rate limits and forge audit-log origins.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
+  // Security headers: HSTS, X-Content-Type-Options=nosniff, frameguard (anti
+  // clickjacking), no X-Powered-By, referrer policy, etc. Resource policy is
+  // cross-origin because the SPA (Vercel) and API (Render) are separate origins
+  // in the managed deployment; on-prem they're same-origin via nginx.
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      // The API serves only JSON, never HTML, so a document CSP is unnecessary
+      // and would only risk breaking future embedded docs/tooling.
+      contentSecurityPolicy: false,
+    }),
+  );
 
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
@@ -23,7 +41,11 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  // Allow the configured origin(s) — comma-separated — plus Vercel preview URLs.
+  // Strict origin allow-list from FRONTEND_ORIGIN (comma-separated). In
+  // production ONLY these exact origins are accepted. Outside production we also
+  // allow *.vercel.app so preview deployments work — never in prod, where a
+  // wildcard would let any attacker-controlled *.vercel.app site make
+  // credentialed cross-origin calls.
   const allowed = config
     .getOrThrow<string>('frontendOrigin')
     .split(',')
@@ -31,11 +53,17 @@ async function bootstrap(): Promise<void> {
     .filter(Boolean);
   app.enableCors({
     origin: (origin, cb) => {
-      if (!origin || allowed.includes(origin) || /\.vercel\.app$/.test(new URL(origin).hostname)) {
-        cb(null, true);
-      } else {
-        cb(null, false);
+      // Non-browser clients (curl, server-to-server) send no Origin — allowed.
+      if (!origin) return cb(null, true);
+      let allow = allowed.includes(origin);
+      if (!allow && !isProduction) {
+        try {
+          allow = /\.vercel\.app$/.test(new URL(origin).hostname);
+        } catch {
+          allow = false; // malformed Origin header
+        }
       }
+      cb(null, allow);
     },
     credentials: true,
   });

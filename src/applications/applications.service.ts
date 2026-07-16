@@ -103,9 +103,22 @@ export class ApplicationsService {
   }
 
   // ---- Step 1 + conflicts autosave ----
+  // Explicit allow-list of applicant-editable fields. Assigning only these —
+  // rather than a blanket Object.assign(app, dto) — means privilege fields
+  // (status, applicantUserId, certified, flagsCount, reference, submittedAt…)
+  // can never be mass-assigned even if the global ValidationPipe whitelist is
+  // ever loosened or a broader DTO is bound here.
+  private static readonly EDITABLE_FIELDS: (keyof UpdateApplicationDto)[] = [
+    'title', 'firstName', 'middleName', 'lastName', 'dob', 'gender',
+    'nationality', 'email', 'phone', 'country', 'city', 'address', 'conflictsText',
+  ];
+
   async patch(userId: string, id: string, dto: UpdateApplicationDto): Promise<Application> {
     const app = await this.assertEditableOwned(userId, id);
-    Object.assign(app, dto);
+    const target = app as unknown as Record<string, unknown>;
+    for (const key of ApplicationsService.EDITABLE_FIELDS) {
+      if (dto[key] !== undefined) target[key] = dto[key];
+    }
     await this.apps.save(app);
     return (await this.getById(id))!;
   }

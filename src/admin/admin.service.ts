@@ -530,7 +530,14 @@ export class AdminService {
       'Review state', 'Shortlist recommended', 'Submitted at',
     ];
     const cell = (v: unknown): string => {
-      const s = v == null ? '' : String(v);
+      let s = v == null ? '' : String(v);
+      // CSV formula-injection defense: a cell beginning with = + - @ (or a
+      // tab/CR) is executed as a formula by Excel/Sheets. Applicant-controlled
+      // fields (names, city, expertise…) flow into this export, so neutralize
+      // the leading character with a `'` prefix before any quoting.
+      if (/^[=+\-@\t\r]/.test(s)) {
+        s = `'${s}`;
+      }
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const lines = [header.join(',')];
@@ -734,6 +741,9 @@ export class AdminService {
     if (!doc) {
       throw new NotFoundException('Document not found');
     }
+    if (!doc.scannedClean) {
+      throw new ConflictException('This document is still being processed.');
+    }
     return { url: await this.storage.presignDownload(doc.storageKey, doc.originalFilename) };
   }
 
@@ -742,6 +752,9 @@ export class AdminService {
     const doc = await this.docs.findOne({ where: { id: docId, applicationId: id } });
     if (!doc) {
       throw new NotFoundException('Document not found');
+    }
+    if (!doc.scannedClean) {
+      throw new ConflictException('This document is still being processed.');
     }
     const url = await this.storage.presignDownload(doc.storageKey, doc.originalFilename, 300, true);
     return { url, mimeType: doc.mimeType, filename: doc.originalFilename };

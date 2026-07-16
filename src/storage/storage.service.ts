@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
@@ -97,9 +98,7 @@ export class StorageService implements OnModuleInit {
    * display the file (image/PDF preview) instead of downloading it.
    */
   presignDownload(key: string, filename?: string, expiresIn = 120, inline = false): Promise<string> {
-    const disposition = filename
-      ? `${inline ? 'inline' : 'attachment'}; filename="${filename}"`
-      : undefined;
+    const disposition = filename ? this.buildDisposition(filename, inline) : undefined;
     return getSignedUrl(
       this.publicClient,
       new GetObjectCommand({
@@ -109,6 +108,23 @@ export class StorageService implements OnModuleInit {
       }),
       { expiresIn },
     );
+  }
+
+  /** RFC 6266 / 5987 Content-Disposition. Quotes and control chars are stripped
+   *  from the ASCII fallback (defense against header injection via a crafted
+   *  filename) and the full name is percent-encoded in `filename*`. */
+  private buildDisposition(filename: string, inline: boolean): string {
+    const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\\r\n]/g, '_');
+    const encoded = encodeURIComponent(filename);
+    return `${inline ? 'inline' : 'attachment'}; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
+  }
+
+  /** Actual stored object metadata — used to verify a just-uploaded object's
+   *  real size/content-type against the client's declared values (a presigned
+   *  PUT can't itself cap size, so we enforce it after the fact). */
+  async headObject(key: string): Promise<{ size: number; contentType?: string }> {
+    const res = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+    return { size: res.ContentLength ?? 0, contentType: res.ContentType };
   }
 
   async delete(key: string): Promise<void> {
