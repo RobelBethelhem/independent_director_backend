@@ -75,12 +75,23 @@ const int = (v: string | undefined, fallback: number): number => {
 
 const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
 
-/** Values that must never survive into a production deployment. Includes the
- *  in-code dev fallbacks below and the placeholders shipped in the *.env.example
- *  files, so a half-configured deploy fails loudly instead of booting insecure. */
-const INSECURE_SECRET_MARKERS = ['change-me', 'changeme', 'replace_me', 'dev-', 'secret', 'password', 'zemen-secret'];
+/** The specific known-insecure values this app can boot with by accident: the
+ *  in-code dev fallbacks and the placeholders shipped in the *.env.example
+ *  files. Narrowly targeted (not broad words like "secret"/"password") so a
+ *  legitimately-random operator secret is never rejected by coincidence. */
+const INSECURE_SECRET_MARKERS = [
+  'change-me',
+  'changeme',
+  'replace_me',
+  'dev-access-secret',
+  'dev-refresh-secret',
+  'zemen-secret',
+];
 
 const looksInsecure = (value: string | undefined): boolean => {
+  // Reject only: unset, too short to be a real secret, or a recognised
+  // default/placeholder. A strong random value (e.g. `openssl rand -hex 32`)
+  // always passes.
   if (!value || value.length < 16) return true;
   const lower = value.toLowerCase();
   return INSECURE_SECRET_MARKERS.some((m) => lower.includes(m));
