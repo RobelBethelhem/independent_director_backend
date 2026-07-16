@@ -38,6 +38,14 @@ export class StorageService implements OnModuleInit {
         accessKeyId: config.getOrThrow<string>('storage.accessKey'),
         secretAccessKey: config.getOrThrow<string>('storage.secretKey'),
       },
+      // The SDK defaults to WHEN_SUPPORTED, which adds a CRC32 checksum to
+      // PutObject. That breaks PRESIGNED uploads: at signing time there is no
+      // body, so it bakes the checksum of an EMPTY payload into the URL
+      // (x-amz-checksum-crc32=AAAAAA==). The browser then PUTs the real file,
+      // whose checksum differs, and a strict S3 implementation (recent MinIO)
+      // rejects it. Only checksum when the operation actually requires it.
+      requestChecksumCalculation: 'WHEN_REQUIRED' as const,
+      responseChecksumValidation: 'WHEN_REQUIRED' as const,
     };
     this.client = new S3Client({ endpoint: config.getOrThrow<string>('storage.endpoint'), ...shared });
     this.publicClient = new S3Client({ endpoint: config.getOrThrow<string>('storage.publicEndpoint'), ...shared });
