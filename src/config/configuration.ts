@@ -63,6 +63,14 @@ export interface AppConfig {
     /** Sender ID / shortcode registered against this gateway account. */
     from: string;
   };
+  security: {
+    /** IPs that can never be auto-blocked and are always allowed to sign in —
+     *  set to your admin workstation(s)/subnet so a false tamper-trigger can't
+     *  lock out the people who'd need to clear the block. */
+    ipAllowlist: string[];
+    /** How many inspection/dev-tools attempts from one IP auto-blocklist it. */
+    tamperStrikeLimit: number;
+  };
 }
 
 const bool = (v: string | undefined, fallback = false): boolean =>
@@ -185,6 +193,13 @@ const buildConfig = (): AppConfig => ({
     username: process.env.SMS_USERNAME ?? '',
     password: process.env.SMS_PASSWORD ?? '',
     from: process.env.SMS_FROM ?? '',
+  },
+  security: {
+    ipAllowlist: (process.env.SECURITY_IP_ALLOWLIST ?? '127.0.0.1,::1')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    tamperStrikeLimit: int(process.env.SECURITY_TAMPER_STRIKE_LIMIT, 3),
   },
 });
 

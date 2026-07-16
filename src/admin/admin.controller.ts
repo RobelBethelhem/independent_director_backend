@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Header,
   HttpCode,
@@ -15,6 +16,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../common/enums';
 import { RecruitmentService } from '../recruitment/recruitment.service';
+import { SecurityService } from '../security/security.service';
 import {
   AdminListQueryDto,
   AdminSearchDto,
@@ -23,6 +25,7 @@ import {
   UpdateCycleSettingsDto,
   UpdateStatusDto,
 } from './admin.dto';
+import { AddBlockedIpDto } from '../security/security.dto';
 
 @Roles(UserRole.Admin)
 @Controller('admin')
@@ -30,6 +33,7 @@ export class AdminController {
   constructor(
     private readonly admin: AdminService,
     private readonly recruitment: RecruitmentService,
+    private readonly security: SecurityService,
   ) {}
 
   @Get('applications')
@@ -143,6 +147,23 @@ export class AdminController {
     @Param('docId', ParseUUIDPipe) docId: string,
   ) {
     return this.admin.previewUrl(id, docId);
+  }
+
+  // ---- IP blocklist management ----
+
+  @Get('blocked-ips')
+  blockedIps() {
+    return this.security.list();
+  }
+
+  @Post('blocked-ips')
+  addBlockedIp(@CurrentUser('id') userId: string, @Body() dto: AddBlockedIpDto) {
+    return this.security.block(dto.ip, 'manual', dto.note ?? null, userId);
+  }
+
+  @Delete('blocked-ips/:id')
+  removeBlockedIp(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.security.unblock(id, userId);
   }
 
   @Get('notifications/pending')

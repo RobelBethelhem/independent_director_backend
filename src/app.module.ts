@@ -19,6 +19,7 @@ import { AuditModule } from './audit/audit.module';
 import { SeedModule } from './seed/seed.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
+import { SecurityModule } from './security/security.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { StorageModule } from './storage/storage.module';
     AuditModule,
     NotificationsModule,
     StorageModule,
+    SecurityModule,
     SeedModule,
   ],
   providers: [

@@ -5,6 +5,7 @@ import { AdminService } from './admin.service';
 import { RecruitmentModule } from '../recruitment/recruitment.module';
 import { UsersModule } from '../users/users.module';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
+import { SecurityModule } from '../security/security.module';
 import { Application } from '../applications/entities/application.entity';
 import { ApplicationDocument } from '../applications/entities/document.entity';
 import { Message } from '../applications/entities/message.entity';
@@ -17,6 +18,7 @@ import { AuditLog } from '../audit/audit-log.entity';
     RecruitmentModule,
     UsersModule,
     RecommendationsModule,
+    SecurityModule,
     TypeOrmModule.forFeature([Application, ApplicationDocument, Message, Review, ReviewScore, AuditLog]),
   ],
   controllers: [AdminController],

@@ -15,6 +15,7 @@ import { UsersService } from '../users/users.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../audit/audit.service';
 import { RecommendationsService } from '../recommendations/recommendations.service';
+import { SecurityService } from '../security/security.service';
 import { TotpService } from './totp.service';
 import { User } from '../users/user.entity';
 import { Otp } from './otp.entity';
@@ -60,6 +61,7 @@ export class AuthService {
     private readonly notifications: NotificationsService,
     private readonly audit: AuditService,
     private readonly recommendations: RecommendationsService,
+    private readonly security: SecurityService,
     private readonly totp: TotpService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -83,6 +85,7 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto): Promise<{ email: string; otpRequired: true; otpLength: number; devCode?: string }> {
+    this.security.assertRequestAllowed();
     const existing = await this.users.findByEmail(dto.email);
     if (existing) {
       throw new ConflictException('An account with this email already exists');
@@ -163,6 +166,7 @@ export class AuthService {
    *  single-sign-on conflict still needs resolving — see verifyTotpLogin /
    *  confirmSessionAndLogin. */
   async login(dto: LoginDto): Promise<AuthSession | LoginChallenge> {
+    this.security.assertRequestAllowed();
     const user = await this.users.findByEmail(dto.email);
     if (!user || user.status === UserStatus.Disabled) {
       // Equalize timing with the real-user path (argon2 is the expensive step)
@@ -342,6 +346,7 @@ export class AuthService {
   // ---- Password reset ----
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ ok: true }> {
+    this.security.assertRequestAllowed();
     const user = await this.users.findByEmail(dto.email);
     if (user) {
       const code = await this.issueOtp(user, OtpPurpose.Reset, OtpChannel.Email, true);
@@ -351,6 +356,7 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<{ ok: true }> {
+    this.security.assertRequestAllowed();
     const user = await this.users.findByEmail(dto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid code');

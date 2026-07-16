@@ -9,6 +9,7 @@ import { TotpService } from './totp.service';
 import { Otp } from './otp.entity';
 import { UsersModule } from '../users/users.module';
 import { RecommendationsModule } from '../recommendations/recommendations.module';
+import { SecurityModule } from '../security/security.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { RecommendationsModule } from '../recommendations/recommendations.module
     JwtModule.register({}),
     TypeOrmModule.forFeature([Otp]),
     RecommendationsModule,
+    SecurityModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, TotpService],
