@@ -420,7 +420,11 @@ export class AuthService {
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ ok: true }> {
     this.security.assertRequestAllowed();
     const user = await this.users.findByEmail(dto.email);
-    if (user) {
+    // Don't mint a fresh reset code while the account is locked out — otherwise
+    // an attacker could keep requesting new OTPs to reset the per-code attempt
+    // counter and brute-force the reset flow indefinitely. Response is always
+    // {ok:true} so account existence / lock state never leaks.
+    if (user && !this.isLockedOut(user)) {
       const code = await this.issueOtp(user, OtpPurpose.Reset, OtpChannel.Email, true);
       await this.notifications.sendPasswordReset(user.email, user.phone, code);
     }
@@ -433,7 +437,21 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid code');
     }
-    await this.consumeOtp(user, dto.code, OtpPurpose.Reset);
+    if (this.isLockedOut(user)) {
+      throw new UnauthorizedException(
+        'Too many failed attempts — this account is temporarily locked. Please try again later.',
+      );
+    }
+    try {
+      await this.consumeOtp(user, dto.code, OtpPurpose.Reset);
+    } catch (err) {
+      // Bind the failure to the ACCOUNT (persists even if the attacker requests
+      // a fresh OTP), locking after MAX_FAILED_ATTEMPTS — closes the
+      // "request-new-code resets the counter" brute-force bypass.
+      await this.registerFailedAttempt(user);
+      throw err;
+    }
+    await this.clearFailedAttempts(user);
     user.passwordHash = await argon2.hash(dto.password);
     user.refreshTokenHash = null; // invalidate existing sessions
     user.activeSessionId = null; // ...and any already-issued access token, immediately

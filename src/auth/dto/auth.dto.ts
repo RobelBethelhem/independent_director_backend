@@ -8,12 +8,13 @@ import {
   MinLength,
 } from 'class-validator';
 
-/** Minimum password complexity — at least one letter and one number. Blocks
- *  trivially guessable secrets like "123456789" or "password" while staying
- *  simple. Enforced only when SETTING a password (register / reset / change),
- *  so existing accounts keep working. */
-const PASSWORD_PATTERN = /(?=.*[A-Za-z])(?=.*\d)/;
-const PASSWORD_MESSAGE = 'Password must contain at least one letter and one number';
+/** Password complexity: at least one lowercase, one uppercase, one number and
+ *  one special character (min length enforced separately). Blocks weak/guessable
+ *  secrets like "123456789" or "password". Enforced only when SETTING a password
+ *  (register / reset / change), so existing accounts keep working. */
+const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/;
+const PASSWORD_MESSAGE =
+  'Password must include uppercase and lowercase letters, a number, and a special character';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'Enter a valid email' })
