@@ -47,6 +47,12 @@ export interface LoginChallenge {
 /** Absolute session ceiling — enforced at refresh time regardless of activity. */
 const SESSION_MAX_MINUTES = 15;
 
+/** Per-account brute-force lockout: after this many consecutive failed
+ *  password/2FA attempts, the account is locked for LOCKOUT_MINUTES. This
+ *  complements the per-IP rate limiter so an attacker can't just rotate IPs. */
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
+
 /** A real argon2 hash of a throwaway value. When login is attempted for an
  *  unknown/disabled account we still run argon2.verify against this so the
  *  response time matches the real-user path — closing the timing side-channel
@@ -175,11 +181,25 @@ export class AuthService {
       await this.recordLoginFailure(dto.email, user?.id, !user ? 'no_such_user' : 'account_disabled');
       throw new UnauthorizedException('Invalid email or password');
     }
+    if (this.isLockedOut(user)) {
+      await argon2.verify(DUMMY_PASSWORD_HASH, dto.password).catch(() => false);
+      await this.recordLoginFailure(dto.email, user.id, 'account_locked');
+      throw new UnauthorizedException(
+        'Too many failed attempts — this account is temporarily locked. Please try again later.',
+      );
+    }
     const valid = await argon2.verify(user.passwordHash, dto.password);
     if (!valid) {
+      const locked = await this.registerFailedAttempt(user);
       await this.recordLoginFailure(dto.email, user.id, 'invalid_password');
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException(
+        locked
+          ? 'Too many failed attempts — this account is temporarily locked. Please try again later.'
+          : 'Invalid email or password',
+      );
     }
+    // Correct password — clear the counter before proceeding to 2FA/session steps.
+    await this.clearFailedAttempts(user);
     if (!user.emailVerified) {
       // Re-trigger verification rather than logging an unverified user in.
       await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
@@ -198,10 +218,22 @@ export class AuthService {
   async verifyTotpLogin(dto: { challengeToken: string; code: string }): Promise<AuthSession | LoginChallenge> {
     const userId = await this.verifyChallenge(dto.challengeToken, 'totp');
     const user = await this.users.getByIdOrThrow(userId);
-    if (!user.totpSecret || !this.totp.verify(user.totpSecret, dto.code)) {
-      await this.recordLoginFailure(user.email, user.id, 'invalid_totp');
-      throw new UnauthorizedException('Invalid authentication code');
+    if (this.isLockedOut(user)) {
+      await this.recordLoginFailure(user.email, user.id, 'account_locked');
+      throw new UnauthorizedException(
+        'Too many failed attempts — this account is temporarily locked. Please try again later.',
+      );
     }
+    if (!user.totpSecret || !this.totp.verify(user.totpSecret, dto.code)) {
+      const locked = await this.registerFailedAttempt(user);
+      await this.recordLoginFailure(user.email, user.id, 'invalid_totp');
+      throw new UnauthorizedException(
+        locked
+          ? 'Too many failed attempts — this account is temporarily locked. Please try again later.'
+          : 'Invalid authentication code',
+      );
+    }
+    await this.clearFailedAttempts(user);
     return this.afterFactorsVerified(user);
   }
 
@@ -260,6 +292,46 @@ export class AuthService {
       entityId: userId,
       metadata: { reason },
     });
+  }
+
+  // ---- Per-account brute-force lockout ----
+
+  private isLockedOut(user: User): boolean {
+    return !!user.lockedUntil && user.lockedUntil.getTime() > Date.now();
+  }
+
+  /** Count a failed password/2FA attempt; lock the account once the threshold
+   *  is reached. Returns true if this attempt tripped the lock. */
+  private async registerFailedAttempt(user: User): Promise<boolean> {
+    user.failedLoginCount = (user.failedLoginCount ?? 0) + 1;
+    let locked = false;
+    if (user.failedLoginCount >= MAX_FAILED_ATTEMPTS) {
+      user.lockedUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60_000);
+      user.failedLoginCount = 0; // the lock is now the gate
+      locked = true;
+    }
+    await this.users.save(user);
+    if (locked) {
+      await this.audit.record({
+        action: 'auth.account_locked',
+        outcome: 'failure',
+        actorUserId: user.id,
+        actorEmail: user.email,
+        entityType: 'user',
+        entityId: user.id,
+        metadata: { minutes: LOCKOUT_MINUTES },
+      });
+    }
+    return locked;
+  }
+
+  /** Clear the failure counter after any successful authentication factor. */
+  private async clearFailedAttempts(user: User): Promise<void> {
+    if (user.failedLoginCount !== 0 || user.lockedUntil !== null) {
+      user.failedLoginCount = 0;
+      user.lockedUntil = null;
+      await this.users.save(user);
+    }
   }
 
   // ---- Two-factor authentication (TOTP) — every role except applicant ----

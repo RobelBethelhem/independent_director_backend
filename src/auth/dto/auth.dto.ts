@@ -8,6 +8,13 @@ import {
   MinLength,
 } from 'class-validator';
 
+/** Minimum password complexity — at least one letter and one number. Blocks
+ *  trivially guessable secrets like "123456789" or "password" while staying
+ *  simple. Enforced only when SETTING a password (register / reset / change),
+ *  so existing accounts keep working. */
+const PASSWORD_PATTERN = /(?=.*[A-Za-z])(?=.*\d)/;
+const PASSWORD_MESSAGE = 'Password must contain at least one letter and one number';
+
 export class RegisterDto {
   @IsEmail({}, { message: 'Enter a valid email' })
   email!: string;
@@ -18,6 +25,7 @@ export class RegisterDto {
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password!: string;
 
   /** Optional referral token when registering from a recommendation link. */
@@ -66,6 +74,7 @@ export class ResetPasswordDto {
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password!: string;
 }
 
@@ -76,6 +85,7 @@ export class ChangePasswordDto {
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   newPassword!: string;
 }
 

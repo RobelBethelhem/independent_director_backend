@@ -46,6 +46,17 @@ export class User {
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.Active })
   status!: UserStatus;
 
+  /** Consecutive failed login (or 2FA) attempts. Reset to 0 on any successful
+   *  authentication. Once it reaches the threshold the account is locked. */
+  @Column({ name: 'failed_login_count', type: 'int', default: 0 })
+  failedLoginCount!: number;
+
+  /** When set to a future time, the account is temporarily locked out from
+   *  authenticating — brute-force protection (per-account, complements the
+   *  per-IP rate limiter). Null when not locked. */
+  @Column({ name: 'locked_until', type: 'timestamptz', nullable: true })
+  lockedUntil!: Date | null;
+
   /** Hashed refresh token (rotation). Null when logged out. Single slot by
    *  design — issuing a new one (a fresh login) invalidates any other
    *  session, which is what makes single sign-on enforceable at all. */
