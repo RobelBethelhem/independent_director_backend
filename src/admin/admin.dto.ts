@@ -1,5 +1,6 @@
-import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { ApplicationStatus, MessageChannel, MessageTemplate, UserRole } from '../common/enums';
+import { PHONE_PATTERN, PHONE_MESSAGE } from '../common/phone';
 
 export class CreateUserDto {
   @IsString() @MaxLength(120)
@@ -8,7 +9,7 @@ export class CreateUserDto {
   @IsEmail()
   email!: string;
 
-  @IsOptional() @IsString() @MaxLength(40)
+  @IsOptional() @IsString() @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
   phone?: string;
 
   @IsIn([UserRole.Reviewer, UserRole.Admin, UserRole.Auditor, UserRole.Recommender])

@@ -7,6 +7,7 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import { PHONE_PATTERN, PHONE_MESSAGE } from '../../common/phone';
 
 /** Password complexity: at least one lowercase, one uppercase, one number and
  *  one special character (min length enforced separately). Blocks weak/guessable
@@ -22,6 +23,7 @@ export class RegisterDto {
 
   @IsString()
   @IsNotEmpty({ message: 'Required' })
+  @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
   phone!: string;
 
   @IsString()
