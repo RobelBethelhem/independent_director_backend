@@ -79,6 +79,21 @@ const int = (v: string | undefined, fallback: number): number => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+/**
+ * Read a mandatory, security-sensitive value from the environment. There is
+ * deliberately NO in-code fallback for these (JWT secrets, DB URL, storage
+ * credentials) — a predictable default in source could ship to a misconfigured
+ * production deployment (pentest 2.2.3.3). Missing/empty => fail fast at boot,
+ * in every environment. Set them in `.env` (see .env.example).
+ */
+const requireEnv = (name: string): string => {
+  const v = process.env[name];
+  if (!v || !v.trim()) {
+    throw new Error(`Missing required configuration "${name}" — set it in the environment (.env / deployment env).`);
+  }
+  return v;
+};
+
 const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
 
 /** The specific known-insecure values this app can boot with by accident: the
@@ -139,20 +154,20 @@ const buildConfig = (): AppConfig => ({
   port: int(process.env.PORT, 3000),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
   database: {
-    url:
-      process.env.DATABASE_URL ??
-      'postgres://zemen:zemen@localhost:5432/zemen_director_portal',
+    // Required — no in-code default (contains DB credentials).
+    url: requireEnv('DATABASE_URL'),
     synchronize: bool(process.env.DB_SYNCHRONIZE, true),
     logging: bool(process.env.DB_LOGGING, false),
     // Managed Postgres (Render/Neon/Supabase) requires TLS.
     ssl: bool(process.env.DB_SSL, false),
   },
   jwt: {
-    accessSecret: process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me',
+    // Signing secrets are required — never a predictable in-code fallback.
+    accessSecret: requireEnv('JWT_ACCESS_SECRET'),
     accessTtl: process.env.JWT_ACCESS_TTL ?? '15m',
-    refreshSecret: process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-me',
+    refreshSecret: requireEnv('JWT_REFRESH_SECRET'),
     refreshTtl: process.env.JWT_REFRESH_TTL ?? '7d',
-    challengeSecret: `${process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-me'}::login-challenge`,
+    challengeSecret: `${requireEnv('JWT_ACCESS_SECRET')}::login-challenge`,
   },
   otp: {
     ttlMinutes: int(process.env.OTP_TTL_MINUTES, 10),
@@ -172,8 +187,9 @@ const buildConfig = (): AppConfig => ({
     publicEndpoint: process.env.S3_PUBLIC_ENDPOINT ?? process.env.S3_ENDPOINT ?? 'http://localhost:9000',
     region: process.env.S3_REGION ?? 'us-east-1',
     bucket: process.env.S3_BUCKET ?? 'zemen-documents',
-    accessKey: process.env.S3_ACCESS_KEY ?? 'zemen',
-    secretKey: process.env.S3_SECRET_KEY ?? 'zemen-secret',
+    // Storage credentials are required — no predictable in-code fallback.
+    accessKey: requireEnv('S3_ACCESS_KEY'),
+    secretKey: requireEnv('S3_SECRET_KEY'),
     forcePathStyle: bool(process.env.S3_FORCE_PATH_STYLE, true),
   },
   mail: {

@@ -17,23 +17,20 @@ export class SeedService implements OnApplicationBootstrap {
     const existing = await this.users.findByRole(UserRole.Admin);
     if (existing.length > 0) return;
 
-    const isProduction = (process.env.NODE_ENV ?? 'development') === 'production';
-    const email = (process.env.SEED_ADMIN_EMAIL ?? 'admin@zemen.test').toLowerCase();
-    const password = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe123!';
-
-    // Never seed a production admin with a missing, placeholder, or weak
-    // password — that would be a publicly-known credential (the default is in
-    // this repo). Fail loudly so the operator sets a real one.
-    if (isProduction) {
-      const insecure =
-        !process.env.SEED_ADMIN_PASSWORD ||
-        password.length < 12 ||
-        /change|replace|password|admin123/i.test(password);
-      if (insecure) {
-        throw new Error(
-          'Refusing to seed the initial admin: set SEED_ADMIN_PASSWORD to a strong, unique value (≥12 chars, not a placeholder).',
-        );
-      }
+    // No predictable in-code defaults for the initial admin (pentest 2.2.3.3):
+    // both the email and password MUST be supplied explicitly, and the password
+    // must be strong. Fail loudly rather than seed a publicly-known credential.
+    const email = process.env.SEED_ADMIN_EMAIL?.trim().toLowerCase();
+    const password = process.env.SEED_ADMIN_PASSWORD;
+    if (!email || !password) {
+      throw new Error(
+        'Cannot seed the initial administrator: set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in the environment.',
+      );
+    }
+    if (password.length < 12 || /change|replace|password|admin123|123456|qwerty/i.test(password)) {
+      throw new Error(
+        'SEED_ADMIN_PASSWORD is too weak or a placeholder — use a strong, unique value (≥12 characters).',
+      );
     }
 
     await this.users.create({
