@@ -64,12 +64,10 @@ export interface AppConfig {
     from: string;
   };
   security: {
-    /** IPs that can never be auto-blocked and are always allowed to sign in —
-     *  set to your admin workstation(s)/subnet so a false tamper-trigger can't
-     *  lock out the people who'd need to clear the block. */
+    /** IPs that are always allowed to sign in, exempt from the admin IP
+     *  blocklist — set to your admin workstation(s)/subnet so a mistaken block
+     *  can't lock out the people who'd need to clear it. */
     ipAllowlist: string[];
-    /** How many inspection/dev-tools attempts from one IP auto-blocklist it. */
-    tamperStrikeLimit: number;
   };
 }
 
@@ -199,7 +197,6 @@ const buildConfig = (): AppConfig => ({
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    tamperStrikeLimit: int(process.env.SECURITY_TAMPER_STRIKE_LIMIT, 3),
   },
 });
 

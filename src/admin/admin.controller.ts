@@ -158,7 +158,7 @@ export class AdminController {
 
   @Post('blocked-ips')
   addBlockedIp(@CurrentUser('id') userId: string, @Body() dto: AddBlockedIpDto) {
-    return this.security.block(dto.ip, 'manual', dto.note ?? null, userId);
+    return this.security.block(dto.ip, dto.note ?? null, userId);
   }
 
   @Delete('blocked-ips/:id')

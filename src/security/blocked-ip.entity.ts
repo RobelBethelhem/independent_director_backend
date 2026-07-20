@@ -1,9 +1,9 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * An IP address denied access at authentication time. Added automatically after
- * repeated inspection/dev-tools attempts (reason 'automated') or manually by an
- * admin. Removable only by an admin (or by clearing the row + restarting).
+ * An IP address denied access at authentication time. Added and removed by an
+ * admin (see AdminController → "Blocked IPs"). Removable only by an admin (or by
+ * clearing the row + restarting the API).
  */
 @Entity('blocked_ips')
 export class BlockedIp {
@@ -14,15 +14,15 @@ export class BlockedIp {
   @Column({ type: 'varchar' })
   ip!: string;
 
-  /** 'automated' (tamper strikes) or 'manual' (admin-added). */
+  /** Always 'manual' now (admin-added); kept for forward compatibility. */
   @Column({ type: 'varchar', default: 'manual' })
   reason!: string;
 
-  /** Free-text note (admin) or the trigger detail (automated). */
+  /** Admin's free-text note for why the IP was blocked. */
   @Column({ type: 'varchar', nullable: true })
   note!: string | null;
 
-  /** Admin who added it; null when the system auto-blocked. */
+  /** The admin user who added the block. */
   @Column({ name: 'created_by', type: 'varchar', nullable: true })
   createdBy!: string | null;
 
