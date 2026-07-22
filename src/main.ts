@@ -9,11 +9,12 @@ async function bootstrap(): Promise<void> {
   const config = app.get(ConfigService);
   const isProduction = config.get<string>('env') === 'production';
 
-  // Trust exactly ONE proxy hop (the nginx/Render edge that terminates the
-  // client connection). Using `true` would trust any client-supplied
-  // X-Forwarded-For, letting attackers spoof the source IP to evade per-IP
-  // rate limits and forge audit-log origins.
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // Trust exactly N reverse-proxy hops (TRUST_PROXY_HOPS, default 1) so req.ip
+  // resolves to the real client from X-Forwarded-For. Behind a single edge
+  // (Render / one nginx) it's 1; behind chained proxies (on-prem public access
+  // is DMZ nginx -> app nginx -> app) it's 2. A fixed count — never `true`,
+  // which would trust client-supplied XFF and let attackers spoof the source IP.
+  app.getHttpAdapter().getInstance().set('trust proxy', config.get<number>('trustProxyHops') ?? 1);
 
   // Security headers: HSTS, X-Content-Type-Options=nosniff, frameguard (anti
   // clickjacking), no X-Powered-By, referrer policy, etc. Resource policy is

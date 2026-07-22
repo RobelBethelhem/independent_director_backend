@@ -6,6 +6,11 @@ export interface AppConfig {
   env: string;
   port: number;
   frontendOrigin: string;
+  /** Number of trusted reverse-proxy hops in front of the app (for req.ip /
+   *  X-Forwarded-For). 1 for a single nginx/Render edge; set higher when there
+   *  are chained proxies (e.g. on-prem public access is DMZ nginx -> app nginx
+   *  -> app = 2). Never `true`, which would trust client-supplied XFF. */
+  trustProxyHops: number;
   database: {
     url: string;
     synchronize: boolean;
@@ -153,6 +158,7 @@ const buildConfig = (): AppConfig => ({
   env: process.env.NODE_ENV ?? 'development',
   port: int(process.env.PORT, 3000),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  trustProxyHops: int(process.env.TRUST_PROXY_HOPS, 1),
   database: {
     // Required — no in-code default (contains DB credentials).
     url: requireEnv('DATABASE_URL'),
