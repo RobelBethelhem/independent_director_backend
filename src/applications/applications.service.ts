@@ -140,6 +140,12 @@ export class ApplicationsService {
   async replaceProfessional(userId: string, id: string, dto: PutProfessionalDto): Promise<Application> {
     await this.assertEditableOwned(userId, id);
     await this.replaceCollection(ProfessionalQual, id, dto.items);
+    // Drop certificates whose professional qualification entry was removed.
+    await this.cleanupOrphanEntryDocs(
+      id,
+      'professionalEntryId',
+      dto.items.map((it) => it.id).filter((v): v is string => !!v),
+    );
     return (await this.getById(id))!;
   }
 
@@ -158,13 +164,18 @@ export class ApplicationsService {
   /** Delete entry-linked documents (+ their stored files) whose entry no longer exists. */
   private async cleanupOrphanEntryDocs(
     appId: string,
-    field: 'educationEntryId' | 'employmentEntryId',
+    field: 'educationEntryId' | 'employmentEntryId' | 'professionalEntryId',
     keepIds: string[],
   ): Promise<void> {
+    const column = {
+      educationEntryId: 'education_entry_id',
+      employmentEntryId: 'employment_entry_id',
+      professionalEntryId: 'professional_entry_id',
+    }[field];
     const linked = await this.docs
       .createQueryBuilder('d')
       .where('d.application_id = :appId', { appId })
-      .andWhere(`d.${field === 'educationEntryId' ? 'education_entry_id' : 'employment_entry_id'} IS NOT NULL`)
+      .andWhere(`d.${column} IS NOT NULL`)
       .getMany();
     const keep = new Set(keepIds);
     const orphans = linked.filter((d) => !keep.has((d[field] as string) ?? ''));
@@ -364,6 +375,23 @@ export class ApplicationsService {
       e.educationDocs = `Attach the certificate for each qualification you listed (${eduMissing.length} still missing a document).`;
     } else if (eduUnscanned.length > 0) {
       e.educationDocs = 'An educational certificate is still being processed — please wait a moment and resubmit.';
+    }
+
+    // Per-qualification professional certificate: every professional qualification
+    // entered (with any detail filled in) must carry its certificate, mirroring education.
+    const profEntries = (app.professionalQuals ?? []).filter(
+      (p) => (p.name ?? '').trim() || (p.body ?? '').trim() || (p.year ?? '').trim(),
+    );
+    const profCertFor = (entryId: string) =>
+      docs.filter((d) => d.docType === DocType.Prof && d.professionalEntryId === entryId);
+    const profMissing = profEntries.filter((p) => profCertFor(p.id).length === 0);
+    const profUnscanned = profEntries.filter(
+      (p) => profCertFor(p.id).length > 0 && !profCertFor(p.id).some((d) => d.scannedClean),
+    );
+    if (profMissing.length > 0) {
+      e.professionalDocs = `Attach the certificate for each professional qualification you listed (${profMissing.length} still missing a document).`;
+    } else if (profUnscanned.length > 0) {
+      e.professionalDocs = 'A professional certificate is still being processed — please wait a moment and resubmit.';
     }
 
     // Per-position work document: every employment position entered must carry its supporting letter.

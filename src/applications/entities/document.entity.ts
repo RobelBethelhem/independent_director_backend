@@ -45,6 +45,10 @@ export class ApplicationDocument {
   @Index()
   employmentEntryId!: string | null;
 
+  @Column({ name: 'professional_entry_id', type: 'uuid', nullable: true })
+  @Index()
+  professionalEntryId!: string | null;
+
   @Column({ name: 'original_filename', type: 'varchar' })
   originalFilename!: string;
 

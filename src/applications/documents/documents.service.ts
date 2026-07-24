@@ -97,6 +97,7 @@ export class DocumentsService {
       docType: dto.docType,
       educationEntryId: dto.educationEntryId ?? null,
       employmentEntryId: dto.employmentEntryId ?? null,
+      professionalEntryId: dto.professionalEntryId ?? null,
       originalFilename: this.sanitizeDisplayName(dto.originalFilename),
       storageKey: dto.storageKey,
       mimeType: dto.mimeType,
@@ -117,6 +118,8 @@ export class DocumentsService {
       where = { applicationId: appId, docType: DocType.Edu, educationEntryId: dto.educationEntryId };
     } else if (dto.employmentEntryId) {
       where = { applicationId: appId, docType: DocType.Work, employmentEntryId: dto.employmentEntryId };
+    } else if (dto.professionalEntryId) {
+      where = { applicationId: appId, docType: DocType.Prof, professionalEntryId: dto.professionalEntryId };
     }
     if (!where) return;
     const prior = await this.docs.find({ where });

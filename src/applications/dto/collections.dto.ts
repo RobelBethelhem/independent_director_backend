@@ -36,6 +36,8 @@ export class PutEducationDto {
 }
 
 class ProfessionalItem {
+  // Client-supplied stable id so per-qualification certificates stay linked across PUT-replace.
+  @IsOptional() @IsUUID() id?: string;
   @IsOptional() @IsString() @MaxLength(160) name?: string;
   @IsOptional() @IsString() @MaxLength(160) body?: string;
   @IsOptional() @IsString() @MaxLength(10) year?: string;

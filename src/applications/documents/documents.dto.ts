@@ -49,4 +49,8 @@ export class RecordDocumentDto {
   @IsOptional()
   @IsUUID()
   employmentEntryId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  professionalEntryId?: string;
 }
