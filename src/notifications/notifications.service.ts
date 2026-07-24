@@ -189,6 +189,23 @@ export class NotificationsService implements OnModuleInit {
     ]);
   }
 
+  /** Confirmation that the applicant's account was created & their email
+   *  verified — sent once, right after successful sign-up verification. */
+  async sendAccountCreated(email: string): Promise<void> {
+    const html = this.layout(
+      'Your account is ready',
+      `<p style="font-size:14px;line-height:1.6;color:#57504a">Welcome to the Zemen Bank Independent Director Portal. Your account has been created and your email address verified.</p>
+       <p style="font-size:14px;line-height:1.6;color:#57504a">You can now sign in at any time to complete and submit your Independent Director application before the window closes — your progress is saved automatically as you go.</p>
+       <p style="font-size:13px;color:#8a827a">For your security, keep your sign-in details private. If you did not create this account, please contact the Secretariat.</p>`,
+    );
+    await this.send(
+      email,
+      'Your Zemen Independent Director Portal account is ready',
+      html,
+      'Welcome to the Zemen Bank Independent Director Portal. Your account has been created and your email verified. You can now sign in to complete your application.',
+    );
+  }
+
   async sendPasswordReset(email: string, phone: string | null | undefined, code: string): Promise<void> {
     const html = this.layout(
       'Reset your password',

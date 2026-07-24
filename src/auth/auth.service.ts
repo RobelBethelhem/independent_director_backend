@@ -143,8 +143,15 @@ export class AuthService {
       });
       throw err;
     }
+    const wasVerified = user.emailVerified;
     user.emailVerified = true;
     await this.users.save(user);
+    // First-time verification = account creation is complete: send a one-time
+    // confirmation email. Best-effort and non-blocking — a mail hiccup must
+    // never delay or fail the applicant getting into the portal.
+    if (!wasVerified) {
+      void this.notifications.sendAccountCreated(user.email).catch(() => undefined);
+    }
     await this.audit.record({
       actorUserId: user.id,
       actorEmail: user.email,
