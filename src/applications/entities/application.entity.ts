@@ -22,6 +22,9 @@ import { Declaration } from './declaration.entity';
 import { ApplicationDocument } from './document.entity';
 
 @Entity('applications')
+// Covers getMine (filter by applicant_user_id) and createDraft (applicant_user_id
+// + cycle_id) — the applicant's own dashboard load, previously a sequential scan.
+@Index(['applicantUserId', 'cycleId'])
 export class Application {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

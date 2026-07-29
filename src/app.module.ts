@@ -40,6 +40,15 @@ import { SecurityModule } from './security/security.module';
         logging: config.getOrThrow<boolean>('database.logging'),
         // Managed Postgres providers terminate TLS with their own CA.
         ssl: config.getOrThrow<boolean>('database.ssl') ? { rejectUnauthorized: false } : false,
+        // Pool + safety timeouts. Default pool is 10; without a statement timeout
+        // a single stuck query/lock can tie up connections until the pool is
+        // exhausted and the API stalls. Limits are generous enough never to trip a
+        // legitimate query at this scale, but bound a hung one.
+        extra: {
+          max: 20,
+          statement_timeout: 30_000,
+          idle_in_transaction_session_timeout: 60_000,
+        },
       }),
     }),
     AuthModule,

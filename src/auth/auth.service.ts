@@ -433,7 +433,10 @@ export class AuthService {
     // {ok:true} so account existence / lock state never leaks.
     if (user && !this.isLockedOut(user)) {
       const code = await this.issueOtp(user, OtpPurpose.Reset, OtpChannel.Email, true);
-      await this.notifications.sendPasswordReset(user.email, user.phone, code);
+      // Fire-and-forget — the reset code is already persisted; don't block the
+      // response on a slow SMTP/SMS relay (worst case was ~20s). Same pattern as
+      // the other notification sends. Never throws (send() catches internally).
+      void this.notifications.sendPasswordReset(user.email, user.phone, code).catch(() => undefined);
     }
     return { ok: true };
   }
@@ -631,7 +634,10 @@ export class AuthService {
     });
 
     if (!skipSend) {
-      await this.notifications.sendOtp(user.email, user.phone, code);
+      // Fire-and-forget — the code is already persisted above; don't block
+      // register / resend / re-verify on a slow SMTP/SMS relay (worst case was
+      // ~20s). Never throws (send() catches internally).
+      void this.notifications.sendOtp(user.email, user.phone, code).catch(() => undefined);
     }
     return code;
   }
