@@ -9,6 +9,20 @@ export enum UserRole {
   Reviewer = 'reviewer',
   Auditor = 'auditor',
   Recommender = 'recommender',
+  Support = 'support',
+}
+
+/** Who sent a support-chat message. */
+export enum SupportSender {
+  User = 'user',
+  Support = 'support',
+}
+
+/** Kind of support-chat message payload. */
+export enum SupportMessageKind {
+  Text = 'text',
+  Image = 'image',
+  Voice = 'voice',
 }
 
 export enum UserStatus {

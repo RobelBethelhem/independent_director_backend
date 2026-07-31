@@ -20,6 +20,7 @@ import { SeedModule } from './seed/seed.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { StorageModule } from './storage/storage.module';
 import { SecurityModule } from './security/security.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { SecurityModule } from './security/security.module';
     NotificationsModule,
     StorageModule,
     SecurityModule,
+    SupportModule,
     SeedModule,
   ],
   providers: [
