@@ -12,8 +12,8 @@ export class CreateUserDto {
   @IsOptional() @IsString() @Matches(PHONE_PATTERN, { message: PHONE_MESSAGE })
   phone?: string;
 
-  @IsIn([UserRole.Reviewer, UserRole.Admin, UserRole.Auditor, UserRole.Recommender])
-  role!: UserRole.Reviewer | UserRole.Admin | UserRole.Auditor | UserRole.Recommender;
+  @IsIn([UserRole.Reviewer, UserRole.Admin, UserRole.Auditor, UserRole.Recommender, UserRole.Support])
+  role!: UserRole.Reviewer | UserRole.Admin | UserRole.Auditor | UserRole.Recommender | UserRole.Support;
 }
 
 export class AdminListQueryDto {

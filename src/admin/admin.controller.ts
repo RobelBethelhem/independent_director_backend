@@ -66,6 +66,11 @@ export class AdminController {
     return this.admin.listRecommenders();
   }
 
+  @Get('support-agents')
+  supportAgents() {
+    return this.admin.listSupportAgents();
+  }
+
   @Get('board')
   board() {
     return this.admin.board();

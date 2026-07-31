@@ -794,6 +794,10 @@ export class AdminService {
     return this.listStaff(UserRole.Recommender);
   }
 
+  async listSupportAgents() {
+    return this.listStaff(UserRole.Support);
+  }
+
   private async listStaff(role: UserRole) {
     const staff = await this.users.findByRole(role);
     return staff.map((a) => ({
