@@ -499,8 +499,15 @@ export class AuthService {
     // has been, since refresh is the one thing every extended session must
     // eventually pass through. Client-side idle/absolute timers give the UX
     // (auto-redirect before this ever fires); this is the backend backstop.
+    //
+    // Support agents are exempt: they sit on the console all day waiting for
+    // incoming chats, so a 15-minute cap would log them out constantly. Their
+    // session lives until they log out manually (or the 7-day refresh token
+    // lapses after a full week away — the token rotates on every refresh, so
+    // an active agent never hits that). The idle-timer exemption mirrors this
+    // on the client side (see AuthContext).
     const startedAt = user.sessionStartedAt?.getTime() ?? 0;
-    if (Date.now() - startedAt > SESSION_MAX_MINUTES * 60_000) {
+    if (user.role !== UserRole.Support && Date.now() - startedAt > SESSION_MAX_MINUTES * 60_000) {
       user.refreshTokenHash = null;
       user.activeSessionId = null;
       await this.users.save(user);
