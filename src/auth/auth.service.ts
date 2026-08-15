@@ -44,6 +44,16 @@ export interface LoginChallenge {
   existingSession?: { ip: string | null; userAgent: string | null; at: string };
 }
 
+/** Returned from login() when the password is correct but the account's email
+ *  was never verified. A fresh code has already been sent; the client shows the
+ *  OTP entry screen instead of a dead-end error. */
+export interface EmailVerificationRequired {
+  emailVerificationRequired: true;
+  email: string;
+  otpLength: number;
+  devCode?: string;
+}
+
 /** Absolute session ceiling — enforced at refresh time regardless of activity. */
 const SESSION_MAX_MINUTES = 15;
 
@@ -178,7 +188,7 @@ export class AuthService {
    *  factor is needed, or a short-lived challenge token if 2FA and/or a
    *  single-sign-on conflict still needs resolving — see verifyTotpLogin /
    *  confirmSessionAndLogin. */
-  async login(dto: LoginDto): Promise<AuthSession | LoginChallenge> {
+  async login(dto: LoginDto): Promise<AuthSession | LoginChallenge | EmailVerificationRequired> {
     this.security.assertRequestAllowed();
     const user = await this.users.findByEmail(dto.email);
     if (!user || user.status === UserStatus.Disabled) {
@@ -208,10 +218,19 @@ export class AuthService {
     // Correct password — clear the counter before proceeding to 2FA/session steps.
     await this.clearFailedAttempts(user);
     if (!user.emailVerified) {
-      // Re-trigger verification rather than logging an unverified user in.
-      await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
+      // Password is correct but the email was never verified. Re-issue the code
+      // and tell the client to open the OTP entry screen. Previously this threw
+      // a 401 — the code was sent but the applicant was left with an error and
+      // nowhere to type it, so they could never finish verifying (a permanent
+      // lockout on every subsequent login attempt).
+      const code = await this.issueOtp(user, OtpPurpose.Verify, OtpChannel.Email);
       await this.recordLoginFailure(dto.email, user.id, 'email_unverified');
-      throw new UnauthorizedException('Email not verified — a new code has been sent');
+      return {
+        emailVerificationRequired: true,
+        email: user.email,
+        otpLength: this.otpLength,
+        ...(this.devMode ? { devCode: code } : {}),
+      };
     }
     if (user.totpEnabled) {
       return { twoFactorRequired: true, challengeToken: await this.signChallenge(user.id, 'totp') };
