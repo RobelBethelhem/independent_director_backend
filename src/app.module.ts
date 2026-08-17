@@ -37,6 +37,17 @@ import { SupportModule } from './support/support.module';
         type: 'postgres',
         url: config.getOrThrow<string>('database.url'),
         autoLoadEntities: true,
+        // Load each relation in its own query instead of TypeORM 0.3's default
+        // single-statement LEFT JOIN. An application eager-loads up to 8
+        // one-to-many collections (education, employment, boards, documents, …);
+        // joining them all at once yields the *cartesian product* of their row
+        // counts, which for an applicant with many entries/documents explodes
+        // past statement_timeout and 500s the load *and* every autosave. 'query'
+        // keeps each fetch linear. It also fixes take/skip pagination on
+        // one-to-many relations. No find() here orders by a relation column
+        // (the one thing this strategy can't do), and QueryBuilder joins are
+        // unaffected, so this is a safe global default.
+        relationLoadStrategy: 'query',
         synchronize: config.getOrThrow<boolean>('database.synchronize'),
         logging: config.getOrThrow<boolean>('database.logging'),
         // Managed Postgres providers terminate TLS with their own CA.
