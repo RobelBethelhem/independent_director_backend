@@ -121,6 +121,14 @@ export class AdminController {
     return this.admin.exportCsv(q);
   }
 
+  /** Results sheet (Reference, Name, Document/Interview averages, Total, Decision). */
+  @Get('applications/export-results')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="zemen-results.csv"')
+  exportResults(@Query('scope') scope?: string) {
+    return this.admin.exportResultsCsv(scope === 'interview');
+  }
+
   @Get('cycle')
   async cycle() {
     const c = await this.recruitment.getOrCreateActiveCycle();

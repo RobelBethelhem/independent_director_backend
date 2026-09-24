@@ -42,7 +42,7 @@ export enum OtpPurpose {
 
 /**
  * Application status pipeline:
- * draft → submitted → under_review → info_requested → shortlisted → (selected | not_selected)
+ * draft → submitted → under_review → info_requested → shortlisted → (selected | reserve | not_selected)
  * The applicant tracker collapses this to: Submitted → Under Review → Shortlisted → Decision.
  */
 export enum ApplicationStatus {
@@ -53,6 +53,9 @@ export enum ApplicationStatus {
   Shortlisted = 'shortlisted',
   NotSelected = 'not_selected',
   Selected = 'selected',
+  /** Final decision: on the reserve list (appended last so the PG enum only
+   *  needs ADD VALUE). Shown to the applicant as the "Decision" step. */
+  Reserve = 'reserve',
 }
 
 export enum DeclarationItemId {

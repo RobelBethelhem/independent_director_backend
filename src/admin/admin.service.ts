@@ -28,6 +28,7 @@ import {
   CRITERION_WEIGHTS,
   CriterionId,
   DOCUMENT_CRITERIA,
+  INTERVIEW_CRITERIA,
   MessageChannel,
   MessageTemplate,
   SCORE_MAX,
@@ -60,6 +61,7 @@ const STATUS_LABELS: Record<string, string> = {
   shortlisted: 'Shortlisted',
   not_selected: 'Not Selected',
   selected: 'Selected',
+  reserve: 'Reserve',
 };
 
 /** Status that count as "in the pool" (everything an admin sees — not drafts). */
@@ -618,6 +620,88 @@ export class AdminService {
       );
     }
     return lines.join('\n');
+  }
+
+  /** Interview points (/50) per (application, reviewer) for FINAL submissions
+   *  only — computed from the raw scores so legacy rows work too. */
+  private async interviewPointsByApp(appIds: string[]): Promise<Map<string, Map<string, number>>> {
+    const out = new Map<string, Map<string, number>>();
+    if (appIds.length === 0) return out;
+    const finals = await this.reviews.find({ where: { applicationId: In(appIds), submitted: true } });
+    const done = new Set(finals.map((r) => `${r.applicationId}|${r.reviewerUserId}`));
+    if (done.size === 0) return out;
+    const rows = await this.reviewScores.find({
+      where: { applicationId: In(appIds), criterionId: In(INTERVIEW_CRITERIA) },
+    });
+    for (const r of rows) {
+      if (!done.has(`${r.applicationId}|${r.reviewerUserId}`)) continue;
+      const m = out.get(r.applicationId) ?? new Map<string, number>();
+      m.set(r.reviewerUserId, (m.get(r.reviewerUserId) ?? 0) + (r.value / SCORE_MAX) * CRITERION_WEIGHTS[r.criterionId]);
+      out.set(r.applicationId, m);
+    }
+    return out;
+  }
+
+  /**
+   * Results sheet in the Secretariat's format:
+   *   Reference, Name, Document Average, Interview Average, Total Score, Status
+   * Document Average = mean Document Evaluation points (/50) over reviewers who
+   * submitted stage 1; Interview Average = mean Interview points (/50) over
+   * reviewers who made the final submission; Total = Document + Interview
+   * (/100, blank until interviewed). Status is the decision — Selected /
+   * Reserve / Not Selected — or "Pending" while undecided. Sorted by Total,
+   * then Document Average. `interviewOnly` limits it to the interview list.
+   * UTF-8 with BOM + CRLF so Excel opens it directly (Amharic names intact).
+   */
+  async exportResultsCsv(interviewOnly = false): Promise<string> {
+    let pool = await this.pool();
+    if (interviewOnly) pool = pool.filter((a) => a.interviewSelected);
+    const ids = pool.map((a) => a.id);
+    const [docPts, ivPts] = await Promise.all([this.documentPointsByApp(ids), this.interviewPointsByApp(ids)]);
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    const decision: Partial<Record<ApplicationStatus, string>> = {
+      [ApplicationStatus.Selected]: 'Selected',
+      [ApplicationStatus.Reserve]: 'Reserve',
+      [ApplicationStatus.NotSelected]: 'Not Selected',
+    };
+    const rows = pool.map((a) => {
+      const doc = this.docAverage(docPts.get(a.id));
+      const ivMap = ivPts.get(a.id);
+      const iv = ivMap && ivMap.size ? r1(Array.from(ivMap.values()).reduce((x, y) => x + y, 0) / ivMap.size) : null;
+      return {
+        reference: a.reference ?? '',
+        name: [a.title, a.firstName, a.middleName, a.lastName].filter(Boolean).join(' '),
+        doc,
+        iv,
+        total: iv != null ? r1((doc ?? 0) + iv) : null,
+        status: decision[a.status] ?? 'Pending',
+      };
+    });
+    rows.sort(
+      (x, y) =>
+        (y.total ?? -1) - (x.total ?? -1) ||
+        (y.doc ?? -1) - (x.doc ?? -1) ||
+        x.reference.localeCompare(y.reference),
+    );
+    const cell = (v: unknown): string => {
+      let s = v == null ? '' : String(v);
+      // CSV formula-injection defense (see exportCsv).
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      'Reference',
+      'Name',
+      'Document Average (/50)',
+      'Interview Average (/50)',
+      'Total Score (/100)',
+      'Status (Selected / Reserve / Not Selected)',
+    ];
+    const lines = [header.map(cell).join(',')];
+    for (const r of rows) lines.push([r.reference, r.name, r.doc, r.iv, r.total, r.status].map(cell).join(','));
+    setAuditInfo({ entityType: 'recruitment_cycle' });
+    setAuditMeta({ action: 'export_results', rows: rows.length, interviewOnly });
+    return '﻿' + lines.join('\r\n') + '\r\n';
   }
 
   async detail(id: string) {

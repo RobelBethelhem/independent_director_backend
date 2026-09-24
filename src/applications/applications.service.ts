@@ -454,6 +454,7 @@ export class ApplicationsService {
       [ApplicationStatus.Shortlisted]: 2,
       [ApplicationStatus.NotSelected]: 3,
       [ApplicationStatus.Selected]: 3,
+      [ApplicationStatus.Reserve]: 3,
     };
     const currentIndex = collapsed[app.status];
     return {
