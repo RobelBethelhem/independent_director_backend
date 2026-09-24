@@ -154,6 +154,10 @@ export const DOCUMENT_CRITERIA: CriterionId[] = (Object.keys(CRITERION_GROUP) as
   (c) => CRITERION_GROUP[c] === 'document',
 );
 
+export const INTERVIEW_CRITERIA: CriterionId[] = (Object.keys(CRITERION_GROUP) as CriterionId[]).filter(
+  (c) => CRITERION_GROUP[c] === 'interview',
+);
+
 export enum MessageChannel {
   Email = 'email',
   Sms = 'sms',

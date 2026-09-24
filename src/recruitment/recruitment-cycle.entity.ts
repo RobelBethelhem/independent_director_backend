@@ -36,6 +36,16 @@ export class RecruitmentCycle {
   @Column({ name: 'review_close_at', type: 'timestamptz', nullable: true })
   reviewCloseAt!: Date | null;
 
+  /** Interview time frame, set by the admin in Review Settings. Reviewers can
+   *  enter the Interview (50%) scores and make their final submission once
+   *  the interview period has ENDED (interviewEndAt) — see
+   *  RecruitmentService.isInterviewScoringOpen. */
+  @Column({ name: 'interview_start_at', type: 'timestamptz', nullable: true })
+  interviewStartAt!: Date | null;
+
+  @Column({ name: 'interview_end_at', type: 'timestamptz', nullable: true })
+  interviewEndAt!: Date | null;
+
   /** Per-cycle sequence backing the ZB-IDR-{year}-#### reference number. */
   @Column({ name: 'reference_seq', type: 'int', default: 0 })
   referenceSeq!: number;

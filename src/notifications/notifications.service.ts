@@ -122,11 +122,17 @@ export class NotificationsService implements OnModuleInit {
    *  request timeout stops a hanging gateway from stalling an entire bulk
    *  batch on one recipient. */
   private async sendSms(phone: string, message: string): Promise<boolean> {
+    return (await this.sendSmsDetailed(phone, message)).ok;
+  }
+
+  /** Like sendSms, but reports WHY a send failed so bulk senders (interview
+   *  invitations) can show the admin exactly who didn't get it and why. */
+  async sendSmsDetailed(phone: string, message: string): Promise<{ ok: boolean; error?: string }> {
     const to = this.formatPhoneForSms(phone);
     if (!this.smsUsername) {
       // Body (which may contain an OTP/reset code) is logged in dev only.
       this.logger.log(`[sms:logged] to=${to}${this.logMessageBodies ? ` :: ${message}` : ''}`);
-      return false;
+      return { ok: false, error: 'SMS gateway is not configured on the server (SMS_USERNAME is empty)' };
     }
     const url =
       `${this.smsUrl}?username=${encodeURIComponent(this.smsUsername)}` +
@@ -148,10 +154,11 @@ export class NotificationsService implements OnModuleInit {
         }
       });
       this.logger.log(`[sms:sent] to=${to}`);
-      return true;
+      return { ok: true };
     } catch (err) {
-      this.logger.error(`[sms:failed] to=${to} :: ${(err as Error).message}`);
-      return false;
+      const msg = (err as Error).name === 'AbortError' ? 'SMS gateway timed out' : (err as Error).message;
+      this.logger.error(`[sms:failed] to=${to} :: ${msg}`);
+      return { ok: false, error: `SMS gateway error: ${msg}` };
     }
   }
 

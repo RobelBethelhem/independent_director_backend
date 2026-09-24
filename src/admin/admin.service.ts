@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -11,7 +12,7 @@ import { randomBytes } from 'crypto';
 import { Application } from '../applications/entities/application.entity';
 import { ApplicationDocument } from '../applications/entities/document.entity';
 import { Message } from '../applications/entities/message.entity';
-import { Review } from '../applications/entities/review.entity';
+import { isDocumentDone, Review } from '../applications/entities/review.entity';
 import { ReviewScore } from '../applications/entities/review-score.entity';
 import { AuditLog } from '../audit/audit-log.entity';
 import { setAuditInfo, setAuditMeta } from '../common/request-context';
@@ -26,6 +27,9 @@ import {
   ApplicationStatus,
   CRITERION_WEIGHTS,
   CriterionId,
+  DOCUMENT_CRITERIA,
+  MessageChannel,
+  MessageTemplate,
   SCORE_MAX,
   UserRole,
 } from '../common/enums';
@@ -33,9 +37,19 @@ import {
   AdminListQueryDto,
   AdminSearchDto,
   CreateUserDto,
+  InterviewInviteDto,
+  InterviewSelectionDto,
   SendMessageDto,
   UpdateStatusDto,
 } from './admin.dto';
+
+/** Reviews that count as an evaluation: stage 1 (document) or final. */
+const EVALUATED_WHERE = [{ submitted: true }, { documentSubmitted: true }] as const;
+
+/** Fill the SMS draft's placeholders for one applicant. */
+function renderInvite(template: string, vars: { name: string; reference: string }): string {
+  return template.replace(/\{name\}/gi, vars.name).replace(/\{reference\}/gi, vars.reference);
+}
 
 const PAGE_SIZE = 20;
 
@@ -105,7 +119,13 @@ export class AdminService {
     return employment.length ? totalExperienceYears(employment) : null;
   }
 
-  private toListItem(app: Application, score: number | null, evaluatorScores: (number | null)[] = []) {
+  private toListItem(
+    app: Application,
+    score: number | null,
+    evaluatorScores: (number | null)[] = [],
+    docPoints?: Map<string, number>,
+    reviewers: { id: string }[] = [],
+  ) {
     return {
       id: app.id,
       reference: app.reference,
@@ -124,7 +144,43 @@ export class AdminService {
       submittedAt: app.submittedAt,
       score,
       evaluatorScores,
+      /** Average Document Evaluation points (/50) across reviewers who finished stage 1. */
+      docScore: this.docAverage(docPoints),
+      /** Per-evaluator document points (/50), aligned to the committee order. */
+      evaluatorDocScores: reviewers.map((rv) => docPoints?.get(rv.id) ?? null),
+      interviewSelected: app.interviewSelected,
     };
+  }
+
+  /** Document-stage points (/50) per (application, reviewer) for every
+   *  reviewer whose Document Evaluation is done. Computed from the raw scores
+   *  so legacy single-stage submissions (no document_score column) work too. */
+  private async documentPointsByApp(appIds: string[]): Promise<Map<string, Map<string, number>>> {
+    const out = new Map<string, Map<string, number>>();
+    if (appIds.length === 0) return out;
+    const reviews = await this.reviews.find({
+      where: EVALUATED_WHERE.map((w) => ({ ...w, applicationId: In(appIds) })),
+    });
+    const done = new Set(reviews.filter((r) => isDocumentDone(r)).map((r) => `${r.applicationId}|${r.reviewerUserId}`));
+    if (done.size === 0) return out;
+    const rows = await this.reviewScores.find({
+      where: { applicationId: In(appIds), criterionId: In(DOCUMENT_CRITERIA) },
+    });
+    for (const r of rows) {
+      if (!done.has(`${r.applicationId}|${r.reviewerUserId}`)) continue;
+      const m = out.get(r.applicationId) ?? new Map<string, number>();
+      m.set(r.reviewerUserId, (m.get(r.reviewerUserId) ?? 0) + (r.value / SCORE_MAX) * CRITERION_WEIGHTS[r.criterionId]);
+      out.set(r.applicationId, m);
+    }
+    for (const m of out.values()) for (const [k, v] of m) m.set(k, Math.round(v * 10) / 10);
+    return out;
+  }
+
+  /** Average document points (/50) per application, to one decimal. */
+  private docAverage(m: Map<string, number> | undefined): number | null {
+    if (!m || m.size === 0) return null;
+    const vals = Array.from(m.values());
+    return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
   }
 
   /** The review committee, in a stable order (defines Evaluator 1..N). */
@@ -158,11 +214,14 @@ export class AdminService {
     const pool = await this.pool();
     const poolIds = pool.map((a) => a.id);
     const reviewers = await this.committee();
-    const [scores, evalScores] = await Promise.all([
+    const [scores, evalScores, docPts] = await Promise.all([
       this.scoresByApp(poolIds),
       this.evaluatorScoresByApp(poolIds, reviewers),
+      this.documentPointsByApp(poolIds),
     ]);
-    let items = pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? []));
+    let items = pool.map((a) =>
+      this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? [], docPts.get(a.id), reviewers),
+    );
 
     if (q.query) {
       const needle = q.query.toLowerCase();
@@ -179,7 +238,8 @@ export class AdminService {
     }
     const sort = q.sort ?? 'submitted';
     items.sort((a, b) => {
-      if (sort === 'score') return (b.score ?? -1) - (a.score ?? -1);
+      // Final score first; before finals exist, rank by the document stage.
+      if (sort === 'score') return (b.score ?? -1) - (a.score ?? -1) || (b.docScore ?? -1) - (a.docScore ?? -1);
       if (sort === 'name') return (a.lastName ?? '').localeCompare(b.lastName ?? '');
       return new Date(b.submittedAt ?? 0).getTime() - new Date(a.submittedAt ?? 0).getTime();
     });
@@ -202,11 +262,14 @@ export class AdminService {
     const pool = await this.pool();
     const poolIds = pool.map((a) => a.id);
     const reviewers = await this.committee();
-    const [scores, evalScores] = await Promise.all([
+    const [scores, evalScores, docPts] = await Promise.all([
       this.scoresByApp(poolIds),
       this.evaluatorScoresByApp(poolIds, reviewers),
+      this.documentPointsByApp(poolIds),
     ]);
-    return pool.map((a) => this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? []));
+    return pool.map((a) =>
+      this.toListItem(a, scores.get(a.id) ?? null, evalScores.get(a.id) ?? [], docPts.get(a.id), reviewers),
+    );
   }
 
   async stats() {
@@ -235,7 +298,7 @@ export class AdminService {
     const ids = apps.map((a) => a.id);
     const [scoreMap, submittedReviews, scoreRows, reviewers] = await Promise.all([
       this.scoresByApp(ids),
-      this.reviews.find({ where: { submitted: true } }),
+      this.reviews.find({ where: [...EVALUATED_WHERE] }),
       this.reviewScores.find(),
       this.users.findByRole(UserRole.Reviewer),
     ]);
@@ -448,7 +511,7 @@ export class AdminService {
       relations: ['expertise', 'employment', 'boards', 'education'],
     });
     const scores = await this.scoresByApp(apps.map((a) => a.id));
-    const submittedReviews = await this.reviews.find({ where: { submitted: true } });
+    const submittedReviews = await this.reviews.find({ where: [...EVALUATED_WHERE] });
     const reviewerCount = (await this.users.findByRole(UserRole.Reviewer)).length;
     const subByApp = new Map<string, Review[]>();
     for (const r of submittedReviews) {
@@ -814,9 +877,11 @@ export class AdminService {
     const reviews = reviewers.length
       ? await this.reviews.find({ where: { reviewerUserId: In(reviewers.map((r) => r.id)) } })
       : [];
-    const submitted = new Map<string, number>();
+    const finals = new Map<string, number>();
+    const documents = new Map<string, number>();
     for (const rv of reviews) {
-      if (rv.submitted) submitted.set(rv.reviewerUserId, (submitted.get(rv.reviewerUserId) ?? 0) + 1);
+      if (rv.submitted) finals.set(rv.reviewerUserId, (finals.get(rv.reviewerUserId) ?? 0) + 1);
+      if (isDocumentDone(rv)) documents.set(rv.reviewerUserId, (documents.get(rv.reviewerUserId) ?? 0) + 1);
     }
     return reviewers.map((r) => ({
       id: r.id,
@@ -824,8 +889,158 @@ export class AdminService {
       email: r.email,
       status: r.status,
       lastLoginAt: r.lastLoginAt,
-      reviewsSubmitted: submitted.get(r.id) ?? 0,
+      reviewsSubmitted: finals.get(r.id) ?? 0,
+      documentsSubmitted: documents.get(r.id) ?? 0,
+      // A reviewer with any submitted evaluation (either stage) is part of the
+      // record and can't be removed; one who has only drafts (or nothing) can.
+      removable: (documents.get(r.id) ?? 0) === 0,
     }));
+  }
+
+  /** Remove a reviewer who has NOT submitted any evaluation (either stage).
+   *  Their unsubmitted draft scores are discarded with the account (FK
+   *  cascade). Reviewers with submitted evaluations are refused — deleting
+   *  them would silently change applicants' averaged scores. */
+  async removeReviewer(actorUserId: string, id: string) {
+    const user = await this.users.findById(id);
+    if (!user || user.role !== UserRole.Reviewer) {
+      throw new NotFoundException('Reviewer not found');
+    }
+    const evaluated = await this.reviews.count({
+      where: EVALUATED_WHERE.map((w) => ({ ...w, reviewerUserId: id })),
+    });
+    if (evaluated > 0) {
+      throw new ConflictException(
+        `${user.name ?? user.email} has submitted ${evaluated} evaluation${evaluated === 1 ? '' : 's'} and can’t be removed.`,
+      );
+    }
+    await this.users.remove(user);
+    setAuditInfo({ entityType: 'user', entityId: id });
+    setAuditMeta({ removedRole: UserRole.Reviewer, removedEmail: user.email, actorUserId });
+    return { ok: true };
+  }
+
+  // ---- Interview round ----
+
+  /** Every pool applicant ranked by their average Document Evaluation score
+   *  (/50), highest first — the basis for picking the Top-N to interview. */
+  async interviewRanking() {
+    const pool = await this.pool();
+    const ids = pool.map((a) => a.id);
+    const [docPts, reviewers, cycle] = await Promise.all([
+      this.documentPointsByApp(ids),
+      this.committee(),
+      this.recruitment.getOrCreateActiveCycle(),
+    ]);
+    const nameOf = (a: Application) =>
+      [a.title, a.firstName, a.middleName, a.lastName].filter(Boolean).join(' ') || a.reference || a.id;
+    const rows = pool.map((a) => ({
+      id: a.id,
+      reference: a.reference,
+      name: nameOf(a),
+      firstName: a.firstName,
+      lastName: a.lastName,
+      phone: a.phone,
+      status: a.status,
+      docScore: this.docAverage(docPts.get(a.id)),
+      docReviews: docPts.get(a.id)?.size ?? 0,
+      interviewSelected: a.interviewSelected,
+      inviteStatus: a.interviewInviteStatus,
+      inviteError: a.interviewInviteError,
+      invitedAt: a.interviewInvitedAt,
+    }));
+    rows.sort(
+      (x, y) => (y.docScore ?? -1) - (x.docScore ?? -1) || (x.name ?? '').localeCompare(y.name ?? ''),
+    );
+    let rank = 0;
+    const items = rows.map((r) => ({ ...r, rank: r.docScore == null ? null : ++rank }));
+    return {
+      reviewerCount: reviewers.length,
+      interviewStartAt: cycle.interviewStartAt,
+      interviewEndAt: cycle.interviewEndAt,
+      items,
+    };
+  }
+
+  /**
+   * Sends the interview-invitation SMS to each chosen applicant — one at a
+   * time per small batch, each independent (one failure never blocks the
+   * rest) — personalising {name}/{reference}. Every recipient is put on the
+   * interview list (so reviewers can score their interview) whether or not
+   * the SMS got through; the per-recipient outcome is stored so the admin
+   * sees exactly who failed and can resend to just them.
+   */
+  async sendInterviewInvites(actorUserId: string, dto: InterviewInviteDto) {
+    const ids = Array.from(new Set(dto.applicationIds));
+    const apps = await this.apps.find({ where: { id: In(ids), status: Not(ApplicationStatus.Draft) } });
+    if (apps.length === 0) {
+      throw new BadRequestException('No matching applicants to invite');
+    }
+    const nameOf = (a: Application) =>
+      [a.title, a.firstName, a.lastName].filter(Boolean).join(' ') || a.reference || 'Applicant';
+
+    const sent: string[] = [];
+    const failed: { id: string; name: string; reason: string }[] = [];
+    const BATCH = 5; // keep the bank's SMS gateway from being hammered
+    for (let i = 0; i < apps.length; i += BATCH) {
+      const batch = apps.slice(i, i + BATCH);
+      const outcomes = await Promise.allSettled(
+        batch.map(async (a) => {
+          const text = renderInvite(dto.message, { name: nameOf(a), reference: a.reference ?? '' });
+          const res = a.phone
+            ? await this.notifications.sendSmsDetailed(a.phone, text)
+            : { ok: false, error: 'No phone number on the application' };
+          await this.apps.update(
+            { id: a.id },
+            {
+              interviewSelected: true,
+              interviewInviteStatus: res.ok ? 'sent' : 'failed',
+              interviewInviteError: res.ok ? null : (res.error ?? 'Unknown error').slice(0, 300),
+              ...(res.ok ? { interviewInvitedAt: new Date() } : {}),
+            },
+          );
+          await this.messages.save(
+            this.messages.create({
+              applicationId: a.id,
+              fromUserId: actorUserId,
+              channel: MessageChannel.Sms,
+              template: MessageTemplate.Interview,
+              subject: 'Interview invitation',
+              body: text,
+              sentAt: res.ok ? new Date() : null,
+            }),
+          );
+          if (!res.ok) throw new Error(res.error ?? 'SMS failed');
+        }),
+      );
+      outcomes.forEach((o, j) => {
+        const a = batch[j];
+        if (o.status === 'fulfilled') sent.push(a.id);
+        else failed.push({ id: a.id, name: nameOf(a), reason: (o.reason as Error).message });
+      });
+    }
+    setAuditInfo({ entityType: 'recruitment_cycle' });
+    setAuditMeta({ action: 'interview_invites', sentCount: sent.length, failedCount: failed.length, applicationIds: ids });
+    return { total: apps.length, sent: sent.length, failed };
+  }
+
+  /** Put applicants on / take them off the interview list without sending an
+   *  SMS (e.g. invited by phone). Taking someone off is refused once any
+   *  reviewer has made a final submission for them. */
+  async setInterviewSelection(dto: InterviewSelectionDto) {
+    const ids = Array.from(new Set(dto.applicationIds));
+    if (!dto.selected) {
+      const finals = await this.reviews.count({ where: { applicationId: In(ids), submitted: true } });
+      if (finals > 0) {
+        throw new ConflictException(
+          'A reviewer has already made a final submission for one of these applicants — they can’t be removed from the interview list.',
+        );
+      }
+    }
+    await this.apps.update({ id: In(ids), status: Not(ApplicationStatus.Draft) }, { interviewSelected: dto.selected });
+    setAuditInfo({ entityType: 'recruitment_cycle' });
+    setAuditMeta({ action: dto.selected ? 'interview_list_add' : 'interview_list_remove', applicationIds: ids });
+    return { ok: true, count: ids.length };
   }
 
   /** Aggregate of all reviewers' assessments for an application (admin view). */
@@ -849,6 +1064,9 @@ export class AdminService {
     const reviewers = reviews.map((r) => ({
       name: nameById.get(r.reviewerUserId) ?? 'Reviewer',
       submitted: r.submitted,
+      documentSubmitted: isDocumentDone(r),
+      documentScore: r.documentScore != null ? Number(r.documentScore) : null,
+      interviewScore: r.interviewScore != null ? Number(r.interviewScore) : null,
       shortlistRecommended: r.shortlistRecommended,
       weightedScore: r.weightedScore != null ? Number(r.weightedScore) : null,
       scores: scoresByReviewer.get(r.reviewerUserId) ?? {},

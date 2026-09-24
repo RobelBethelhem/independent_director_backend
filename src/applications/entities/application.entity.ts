@@ -116,6 +116,22 @@ export class Application {
   @Column({ name: 'status_notified_at', type: 'timestamptz', nullable: true })
   statusNotifiedAt!: Date | null;
 
+  // ---- Interview round ----
+  /** On the interview list — set when the admin invites the applicant (or
+   *  marks them without SMS). Only these get Interview (50%) scoring. */
+  @Column({ name: 'interview_selected', type: 'boolean', default: false })
+  interviewSelected!: boolean;
+
+  /** Outcome of the most recent interview-invitation SMS: 'sent' | 'failed'. */
+  @Column({ name: 'interview_invite_status', type: 'varchar', length: 16, nullable: true })
+  interviewInviteStatus!: string | null;
+
+  @Column({ name: 'interview_invite_error', type: 'varchar', length: 300, nullable: true })
+  interviewInviteError!: string | null;
+
+  @Column({ name: 'interview_invited_at', type: 'timestamptz', nullable: true })
+  interviewInvitedAt!: Date | null;
+
   // ---- Wizard progress (server-persisted so it resumes on any device) ----
   @Column({ name: 'current_step', type: 'int', default: 0 })
   currentStep!: number;

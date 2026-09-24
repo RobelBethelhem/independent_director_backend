@@ -21,6 +21,8 @@ import {
   AdminListQueryDto,
   AdminSearchDto,
   CreateUserDto,
+  InterviewInviteDto,
+  InterviewSelectionDto,
   SendMessageDto,
   UpdateCycleSettingsDto,
   UpdateStatusDto,
@@ -49,6 +51,31 @@ export class AdminController {
   @Get('reviewers')
   reviewers() {
     return this.admin.listReviewers();
+  }
+
+  /** Remove a reviewer — refused if they've submitted any evaluation. */
+  @Delete('reviewers/:id')
+  removeReviewer(@CurrentUser('id') userId: string, @Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.removeReviewer(userId, id);
+  }
+
+  // ---- Interview round ----
+
+  @Get('interview/ranking')
+  interviewRanking() {
+    return this.admin.interviewRanking();
+  }
+
+  @Post('interview/invite')
+  @HttpCode(200)
+  interviewInvite(@CurrentUser('id') userId: string, @Body() dto: InterviewInviteDto) {
+    return this.admin.sendInterviewInvites(userId, dto);
+  }
+
+  @Post('interview/selection')
+  @HttpCode(200)
+  interviewSelection(@Body() dto: InterviewSelectionDto) {
+    return this.admin.setInterviewSelection(dto);
   }
 
   @Post('users')
@@ -102,6 +129,10 @@ export class AdminController {
       title: c.title,
       submissionCloseAt: c.submissionCloseAt,
       reviewCloseAt: c.reviewCloseAt,
+      interviewStartAt: c.interviewStartAt,
+      interviewEndAt: c.interviewEndAt,
+      // Reviewers can enter Interview scores + final-submit (interview period ended).
+      interviewScoringOpen: this.recruitment.isInterviewScoringOpen(c),
       acceptingApplications: this.recruitment.isAcceptingApplications(c),
       // Review is currently open for scoring (purely time-based, no manual override).
       reviewActive: this.recruitment.isReviewActive(c),

@@ -64,4 +64,9 @@ export class UsersService {
   save(user: User): Promise<User> {
     return this.users.save(user);
   }
+
+  /** Hard-delete (dependent reviews/scores/OTPs cascade; messages set null). */
+  async remove(user: User): Promise<void> {
+    await this.users.remove(user);
+  }
 }

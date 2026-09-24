@@ -30,6 +30,11 @@ export class PutReviewDto {
   @IsOptional() @IsBoolean()
   shortlistRecommended?: boolean;
 
+  /** FINAL submission (document + interview) — only once interview scoring opens. */
   @IsOptional() @IsBoolean()
   submitted?: boolean;
+
+  /** Stage 1 — submit the Document Evaluation (50%) on its own. */
+  @IsOptional() @IsBoolean()
+  submitDocument?: boolean;
 }

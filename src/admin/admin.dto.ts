@@ -1,4 +1,22 @@
-import { IsDateString, IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEmail,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { ApplicationStatus, MessageChannel, MessageTemplate, UserRole } from '../common/enums';
 import { PHONE_PATTERN, PHONE_MESSAGE } from '../common/phone';
 
@@ -66,6 +84,30 @@ export class UpdateCycleSettingsDto {
   // period) but not cleared back to "no deadline". Omit to leave unchanged.
   @IsOptional() @IsDateString()
   reviewCloseAt?: string;
+
+  /** Interview time frame — reviewers get Interview (50%) scoring once it ends. */
+  @IsOptional() @IsDateString()
+  interviewStartAt?: string;
+
+  @IsOptional() @IsDateString()
+  interviewEndAt?: string;
+}
+
+export class InterviewInviteDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @IsUUID('4', { each: true })
+  applicationIds!: string[];
+
+  /** SMS draft; {name} and {reference} are filled in per applicant. */
+  @IsString() @MinLength(5) @MaxLength(640)
+  message!: string;
+}
+
+export class InterviewSelectionDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @IsUUID('4', { each: true })
+  applicationIds!: string[];
+
+  @IsBoolean()
+  selected!: boolean;
 }
 
 export class SendMessageDto {

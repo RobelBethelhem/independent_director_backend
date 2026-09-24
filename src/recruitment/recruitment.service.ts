@@ -64,6 +64,14 @@ export class RecruitmentService {
     return opened && !ended;
   }
 
+  /** True once the admin-set interview period has ended — that's when
+   *  reviewers may enter the Interview (50%) scores and make their final
+   *  submission. Stays open afterwards (each reviewer's final submission is
+   *  what locks their scores). False while no interview period is set. */
+  isInterviewScoringOpen(cycle: RecruitmentCycle): boolean {
+    return !!cycle.interviewEndAt && Date.now() >= new Date(cycle.interviewEndAt).getTime();
+  }
+
   /** True whenever admin status changes must stay locked: applications still
    *  open, OR review hasn't reached its close date yet, OR review-close was
    *  never configured at all (conservative until an admin sets it). Only
@@ -79,16 +87,31 @@ export class RecruitmentService {
    *  whichever value is in effect once this update applies). */
   async updateSettings(
     id: string,
-    dto: { submissionCloseAt?: string; reviewCloseAt?: string },
+    dto: { submissionCloseAt?: string; reviewCloseAt?: string; interviewStartAt?: string; interviewEndAt?: string },
   ): Promise<RecruitmentCycle> {
     const cycle = await this.getById(id);
     const nextSubmission = dto.submissionCloseAt ? new Date(dto.submissionCloseAt) : cycle.submissionCloseAt;
     const nextReview = dto.reviewCloseAt ? new Date(dto.reviewCloseAt) : cycle.reviewCloseAt;
+    const nextIvStart = dto.interviewStartAt ? new Date(dto.interviewStartAt) : cycle.interviewStartAt;
+    const nextIvEnd = dto.interviewEndAt ? new Date(dto.interviewEndAt) : cycle.interviewEndAt;
     if (nextReview && nextReview.getTime() <= nextSubmission.getTime()) {
       throw new BadRequestException('The review-close date must be after the application-close date.');
     }
+    if ((nextIvStart && !nextIvEnd) || (!nextIvStart && nextIvEnd)) {
+      throw new BadRequestException('Set both the interview start and end dates.');
+    }
+    if (nextIvStart && nextIvEnd) {
+      if (nextIvEnd.getTime() <= nextIvStart.getTime()) {
+        throw new BadRequestException('The interview end must be after the interview start.');
+      }
+      if (nextIvStart.getTime() <= nextSubmission.getTime()) {
+        throw new BadRequestException('The interview period must start after applications close.');
+      }
+    }
     if (dto.submissionCloseAt !== undefined) cycle.submissionCloseAt = nextSubmission;
     if (dto.reviewCloseAt !== undefined) cycle.reviewCloseAt = nextReview;
+    if (dto.interviewStartAt !== undefined) cycle.interviewStartAt = nextIvStart;
+    if (dto.interviewEndAt !== undefined) cycle.interviewEndAt = nextIvEnd;
     return this.cycles.save(cycle);
   }
 
