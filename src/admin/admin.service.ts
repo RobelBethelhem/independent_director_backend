@@ -1025,11 +1025,13 @@ export class AdminService {
       firstName: a.firstName,
       lastName: a.lastName,
       phone: a.phone,
+      email: a.email,
       status: a.status,
       docScore: this.docAverage(docPts.get(a.id)),
       docReviews: docPts.get(a.id)?.size ?? 0,
       interviewSelected: a.interviewSelected,
       inviteStatus: a.interviewInviteStatus,
+      inviteChannels: a.interviewInviteChannels,
       inviteError: a.interviewInviteError,
       invitedAt: a.interviewInvitedAt,
     }));
@@ -1047,12 +1049,14 @@ export class AdminService {
   }
 
   /**
-   * Sends the interview-invitation SMS to each chosen applicant — one at a
-   * time per small batch, each independent (one failure never blocks the
-   * rest) — personalising {name}/{reference}. Every recipient is put on the
-   * interview list (so reviewers can score their interview) whether or not
-   * the SMS got through; the per-recipient outcome is stored so the admin
-   * sees exactly who failed and can resend to just them.
+   * Sends the interview invitation to each chosen applicant by EMAIL (the
+   * same mail server that delivers account/OTP emails) and by SMS (when the
+   * bank's gateway is configured), personalising {name}/{reference}. An
+   * invitation counts as delivered if EITHER channel gets through; a channel
+   * that failed is still noted so the admin knows (e.g. "SMS gateway not
+   * configured"). Recipients are handled in small independent batches — one
+   * failure never blocks the rest — and every attempted applicant is put on
+   * the interview list so reviewers can score their interview regardless.
    */
   async sendInterviewInvites(actorUserId: string, dto: InterviewInviteDto) {
     const ids = Array.from(new Set(dto.applicationIds));
@@ -1060,41 +1064,61 @@ export class AdminService {
     if (apps.length === 0) {
       throw new BadRequestException('No matching applicants to invite');
     }
+    // Fall back to the applicant's account email when the form has none.
+    const accounts = await this.users.findByIds(apps.filter((a) => !a.email).map((a) => a.applicantUserId));
+    const accountEmail = new Map(accounts.map((u) => [u.id, u.email]));
     const nameOf = (a: Application) =>
       [a.title, a.firstName, a.lastName].filter(Boolean).join(' ') || a.reference || 'Applicant';
 
     const sent: string[] = [];
     const failed: { id: string; name: string; reason: string }[] = [];
-    const BATCH = 5; // keep the bank's SMS gateway from being hammered
+    const channelsById = new Map<string, string>();
+    const BATCH = 5; // keep the mail server and SMS gateway from being hammered
     for (let i = 0; i < apps.length; i += BATCH) {
       const batch = apps.slice(i, i + BATCH);
       const outcomes = await Promise.allSettled(
         batch.map(async (a) => {
           const text = renderInvite(dto.message, { name: nameOf(a), reference: a.reference ?? '' });
-          const res = a.phone
-            ? await this.notifications.sendSmsDetailed(a.phone, text)
-            : { ok: false, error: 'No phone number on the application' };
+          const email = a.email || accountEmail.get(a.applicantUserId) || null;
+          const [em, sm] = await Promise.all([
+            email
+              ? this.notifications.sendInterviewInviteEmail(email, text)
+              : Promise.resolve({ ok: false, error: 'no email address' }),
+            a.phone
+              ? this.notifications.sendSmsDetailed(a.phone, text)
+              : Promise.resolve({ ok: false, error: 'no phone number' }),
+          ]);
+          const channels = [em.ok ? 'email' : null, sm.ok ? 'sms' : null].filter(Boolean).join('+') || null;
+          const notes = [
+            em.ok ? null : `Email: ${em.error ?? 'failed'}`,
+            sm.ok ? null : `SMS: ${sm.error ?? 'failed'}`,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          const ok = em.ok || sm.ok;
           await this.apps.update(
             { id: a.id },
             {
               interviewSelected: true,
-              interviewInviteStatus: res.ok ? 'sent' : 'failed',
-              interviewInviteError: res.ok ? null : (res.error ?? 'Unknown error').slice(0, 300),
-              ...(res.ok ? { interviewInvitedAt: new Date() } : {}),
+              interviewInviteStatus: ok ? 'sent' : 'failed',
+              interviewInviteChannels: channels,
+              interviewInviteError: notes ? notes.slice(0, 300) : null,
+              ...(ok ? { interviewInvitedAt: new Date() } : {}),
             },
           );
           await this.messages.save(
             this.messages.create({
               applicationId: a.id,
               fromUserId: actorUserId,
-              channel: MessageChannel.Sms,
+              channel: em.ok && sm.ok ? MessageChannel.Both : sm.ok ? MessageChannel.Sms : MessageChannel.Email,
               template: MessageTemplate.Interview,
               subject: 'Interview invitation',
               body: text,
-              sentAt: res.ok ? new Date() : null,
+              sentAt: ok ? new Date() : null,
             }),
           );
-          if (!res.ok) throw new Error(res.error ?? 'SMS failed');
+          if (!ok) throw new Error(notes);
+          if (channels) channelsById.set(a.id, channels);
         }),
       );
       outcomes.forEach((o, j) => {
@@ -1103,9 +1127,18 @@ export class AdminService {
         else failed.push({ id: a.id, name: nameOf(a), reason: (o.reason as Error).message });
       });
     }
+    const byEmail = sent.filter((id) => channelsById.get(id)?.includes('email')).length;
+    const bySms = sent.filter((id) => channelsById.get(id)?.includes('sms')).length;
     setAuditInfo({ entityType: 'recruitment_cycle' });
-    setAuditMeta({ action: 'interview_invites', sentCount: sent.length, failedCount: failed.length, applicationIds: ids });
-    return { total: apps.length, sent: sent.length, failed };
+    setAuditMeta({
+      action: 'interview_invites',
+      sentCount: sent.length,
+      byEmail,
+      bySms,
+      failedCount: failed.length,
+      applicationIds: ids,
+    });
+    return { total: apps.length, sent: sent.length, byEmail, bySms, failed };
   }
 
   /** Put applicants on / take them off the interview list without sending an

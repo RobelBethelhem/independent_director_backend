@@ -126,6 +126,11 @@ export class Application {
   @Column({ name: 'interview_invite_status', type: 'varchar', length: 16, nullable: true })
   interviewInviteStatus!: string | null;
 
+  /** Channels that actually delivered the last invitation: 'email', 'sms' or 'email+sms'. */
+  @Column({ name: 'interview_invite_channels', type: 'varchar', length: 16, nullable: true })
+  interviewInviteChannels!: string | null;
+
+  /** Why a channel didn't deliver (kept even when the other channel succeeded). */
   @Column({ name: 'interview_invite_error', type: 'varchar', length: 300, nullable: true })
   interviewInviteError!: string | null;
 

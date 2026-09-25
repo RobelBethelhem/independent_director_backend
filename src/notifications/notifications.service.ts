@@ -93,21 +93,47 @@ export class NotificationsService implements OnModuleInit {
    *  this; fire-and-forget callers (OTP, etc.) can ignore it. Never throws —
    *  a mail failure must never break the caller's request flow. */
   private async send(to: string, subject: string, html: string, text: string): Promise<boolean> {
+    return (await this.sendDetailed(to, subject, html, text)).ok;
+  }
+
+  /** Same as send(), but says WHY it didn't deliver (for per-recipient reports). */
+  private async sendDetailed(
+    to: string,
+    subject: string,
+    html: string,
+    text: string,
+  ): Promise<{ ok: boolean; error?: string }> {
     if (!this.ready) {
       // Body (which may contain an OTP/reset code) is logged in dev only.
       this.logger.log(
         `[email:logged] to=${to} subject="${subject}"${this.logMessageBodies ? ` :: ${text}` : ''}`,
       );
-      return false;
+      return { ok: false, error: 'email server (SMTP) is not reachable from the server' };
     }
     try {
       const info = await this.withRetry(() => this.transporter.sendMail({ from: this.from, to, subject, text, html }));
       this.logger.log(`[email:sent] to=${to} subject="${subject}" id=${info.messageId}`);
-      return true;
+      return { ok: true };
     } catch (err) {
       this.logger.error(`[email:failed] to=${to} subject="${subject}" :: ${(err as Error).message}`);
-      return false;
+      return { ok: false, error: `email delivery failed: ${(err as Error).message}`.slice(0, 160) };
     }
+  }
+
+  /** Interview invitation by email — the admin's (already personalised)
+   *  message in the branded layout. HTML-escaped: it carries applicant names. */
+  async sendInterviewInviteEmail(to: string, message: string): Promise<{ ok: boolean; error?: string }> {
+    const safe = message
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    const html = this.layout(
+      'Interview invitation',
+      `<p style="font-size:14px;line-height:1.7;color:#57504a;white-space:pre-wrap">${safe}</p>
+       <p style="font-size:13px;color:#57504a;margin-top:18px">— Nomination &amp; Governance Committee, Zemen Bank</p>`,
+    );
+    return this.sendDetailed(to, 'Interview invitation — Zemen Bank Independent Director', html, message);
   }
 
   /** Gateway expects a bare 251-prefixed number, no '+'. Handles both our own
@@ -132,7 +158,7 @@ export class NotificationsService implements OnModuleInit {
     if (!this.smsUsername) {
       // Body (which may contain an OTP/reset code) is logged in dev only.
       this.logger.log(`[sms:logged] to=${to}${this.logMessageBodies ? ` :: ${message}` : ''}`);
-      return { ok: false, error: 'SMS gateway is not configured on the server (SMS_USERNAME is empty)' };
+      return { ok: false, error: 'SMS gateway not configured (SMS_USERNAME is empty)' };
     }
     const url =
       `${this.smsUrl}?username=${encodeURIComponent(this.smsUsername)}` +
